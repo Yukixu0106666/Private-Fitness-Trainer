@@ -29,150 +29,81 @@
       </section>
 
       <section id="app-content" class="grid hidden">
-        <form id="daily-form" class="card form-card">
+        <div class="card form-card">
           <div class="card-heading">
             <div>
-              <p class="section-kicker">TODAY'S CHECK-IN</p>
-              <h2>今天的反馈</h2>
+              <p class="section-kicker">DAILY COACHING FLOW</p>
+              <h2>今天的教练</h2>
             </div>
             <input id="log-date" class="date-input" type="date" required />
           </div>
 
-          <label class="field">
-            <span>你的目标</span>
-            <select id="goal">
-              <option value="fat-loss">减脂塑形</option>
-              <option value="muscle">增肌增力</option>
-              <option value="fitness">提升体能</option>
-              <option value="health">保持健康</option>
-            </select>
-          </label>
+          <nav class="phase-tabs" aria-label="一天的三个阶段">
+            <button class="phase-tab" data-phase="morning" type="button"><span>早</span><strong>早上计划</strong><small>状态与今日安排</small></button>
+            <button class="phase-tab" data-phase="midday" type="button"><span>中</span><strong>训练完成</strong><small>运动与拉伸</small></button>
+            <button class="phase-tab" data-phase="evening" type="button"><span>晚</span><strong>晚上复盘</strong><small>饮食与排便</small></button>
+          </nav>
 
-          <div class="metrics profile-metrics">
+          <form id="morning-form" class="phase-form">
+            <div class="phase-heading"><div><p class="section-kicker">MORNING CHECK-IN</p><h3>早上好，先看看今天的身体状态</h3></div><span id="morning-saved" class="saved-mark"></span></div>
+            <label class="field"><span>你的目标</span><select id="goal"><option value="fat-loss">减脂塑形</option><option value="muscle">增肌增力</option><option value="fitness">提升体能</option><option value="health">保持健康</option></select></label>
+            <div class="metrics profile-metrics">
             <label class="field">
-              <span>今天体重（kg）</span>
+              <span>晨起体重（kg）</span>
               <input id="weight" type="number" min="20" max="300" step="0.01" placeholder="例如：55.05" required />
             </label>
-            <label class="field">
-              <span>测量时间</span>
-              <select id="weight-timing">
-                <option value="morning">晨起空腹</option>
-                <option value="evening">晚餐后</option>
-                <option value="other">其他时间</option>
-              </select>
-            </label>
-          </div>
-          <small class="field-help">长期趋势请优先比较每天晨起、如厕、早餐前的体重；晚餐后的数据会单独标记。</small>
-
-          <label class="field">
-            <span>今天吃了什么？</span>
-            <textarea id="food" rows="3" placeholder="例如：早餐鸡蛋和燕麦；午餐牛肉、米饭和西兰花……"></textarea>
-          </label>
-
-          <fieldset class="field radio-field">
-            <legend>饮食记录状态</legend>
-            <label><input type="radio" name="food-status" value="partial" checked /> 目前为止的部分记录</label>
-            <label><input type="radio" name="food-status" value="complete" /> 今天全天已完成</label>
-          </fieldset>
-
-          <label class="field">
-            <span>饮食照片 <em>可选</em></span>
-            <input id="food-photos" type="file" accept="image/*" multiple />
-            <div id="photo-preview" class="photo-preview">
-              <div class="upload-hint">点击选择照片，帮助 AI 识别分量和搭配</div>
+              <label class="field"><span>睡眠（小时）</span><input id="sleep" type="number" min="0" max="24" step="0.5" value="7" required /></label>
             </div>
-          </label>
+            <small class="field-help">建议晨起、如厕、早餐前称重，趋势更有参考价值。</small>
+            <div class="metrics">
+              <label class="field"><span>精力</span><select id="energy"><option value="5">5 · 很好</option><option value="4">4 · 不错</option><option value="3" selected>3 · 一般</option><option value="2">2 · 较低</option><option value="1">1 · 很差</option></select></label>
+              <label class="field"><span>肌肉酸痛</span><select id="soreness"><option value="1">1 · 几乎没有</option><option value="2" selected>2 · 轻微</option><option value="3">3 · 中等</option><option value="4">4 · 明显</option><option value="5">5 · 很严重</option></select></label>
+              <label class="field"><span>可运动时间</span><select id="available-time"><option value="20">20 分钟</option><option value="30">30 分钟</option><option value="45" selected>45 分钟</option><option value="60">60 分钟</option></select></label>
+            </div>
+            <label class="field"><span>身体不适或特别安排 <em>可选</em></span><input id="morning-notes" type="text" placeholder="例如：右膝不舒服，今天只能在家练" /></label>
+            <button id="morning-submit" class="primary-button" type="submit">生成今天的饮食与运动计划 <span>→</span></button>
+          </form>
 
-          <div class="wellness-heading">
-            <span>排便情况</span>
-            <small>帮助教练调整纤维和饮水</small>
-          </div>
-          <div class="metrics">
-            <label class="field">
-              <span>今天次数</span>
-              <select id="bowel-frequency">
-                <option value="0">没有</option>
-                <option value="1" selected>1 次</option>
-                <option value="2">2 次</option>
-                <option value="3">3 次或以上</option>
-              </select>
-            </label>
-            <label class="field">
-              <span>大便状态</span>
-              <select id="bowel-form">
-                <option value="normal" selected>正常</option>
-                <option value="hard">偏硬/干结</option>
-                <option value="loose">偏稀</option>
-                <option value="watery">水样</option>
-                <option value="unknown">不确定</option>
-              </select>
-            </label>
-            <label class="field">
-              <span>排便感受</span>
-              <select id="bowel-symptoms">
-                <option value="none" selected>无明显不适</option>
-                <option value="straining">需要用力</option>
-                <option value="incomplete">总觉得没排干净</option>
-                <option value="bloating">伴随腹胀</option>
-                <option value="pain">有疼痛/出血</option>
-              </select>
-            </label>
-          </div>
-          <small class="field-help">只记录你愿意分享的信息；持续疼痛、出血或明显异常请咨询医生。</small>
+          <form id="midday-form" class="phase-form hidden">
+            <div class="phase-heading"><div><p class="section-kicker">POST-WORKOUT</p><h3>练完了，记录实际完成情况</h3></div><span id="midday-saved" class="saved-mark"></span></div>
+            <div class="field"><span class="field-label">做了哪些运动，各做了多久？</span><div id="exercise-list" class="exercise-list"></div><button id="add-exercise" class="add-row-button" type="button">＋ 添加一项运动</button></div>
+            <div class="metrics profile-metrics">
+              <label class="field"><span>是否按早上建议完成</span><select id="plan-adherence"><option value="all">全部完成</option><option value="partial" selected>完成一部分</option><option value="different">做了其他运动</option><option value="none">今天没做</option></select></label>
+              <label class="field"><span>实际强度</span><select id="workout-effort"><option value="2">2 · 很轻松</option><option value="3" selected>3 · 适中</option><option value="4">4 · 较累</option><option value="5">5 · 非常累</option></select></label>
+            </div>
+            <label class="field"><span>训练后感觉 <em>可选</em></span><input id="workout-notes" type="text" placeholder="例如：腿比较紧，左肩活动时不舒服" /></label>
+            <button id="midday-submit" class="primary-button" type="submit">生成训练后拉伸建议 <span>→</span></button>
+          </form>
 
-          <label class="field">
-            <span>今天完成的训练</span>
-            <textarea id="workout" rows="3" placeholder="例如：深蹲 4×8、卧推 3×10，快走 20 分钟"></textarea>
-          </label>
-
-          <div class="metrics">
-            <label class="field">
-              <span>精力</span>
-              <select id="energy">
-                <option value="5">5 · 很好</option>
-                <option value="4">4 · 不错</option>
-                <option value="3" selected>3 · 一般</option>
-                <option value="2">2 · 较低</option>
-                <option value="1">1 · 很差</option>
-              </select>
-            </label>
-            <label class="field">
-              <span>肌肉酸痛</span>
-              <select id="soreness">
-                <option value="1">1 · 几乎没有</option>
-                <option value="2" selected>2 · 轻微</option>
-                <option value="3">3 · 中等</option>
-                <option value="4">4 · 明显</option>
-                <option value="5">5 · 很严重</option>
-              </select>
-            </label>
-            <label class="field">
-              <span>睡眠（小时）</span>
-              <input id="sleep" type="number" min="0" max="24" step="0.5" value="7" />
-            </label>
-          </div>
-
-          <label class="field">
-            <span>特别想让教练注意什么？ <em>可选</em></span>
-            <input id="notes" type="text" placeholder="例如：右膝有点不舒服，明天只有 30 分钟" />
-          </label>
-
-          <button id="submit-button" class="primary-button" type="submit">让 AI 教练分析 <span>→</span></button>
-          <p class="privacy-note">提交后照片会发送到你配置的 AI 服务进行识别。不要上传敏感或可识别他人的照片。</p>
-        </form>
+          <form id="evening-form" class="phase-form hidden">
+            <div class="phase-heading"><div><p class="section-kicker">EVENING REVIEW</p><h3>晚上好，完成今天的饮食与身体复盘</h3></div><span id="evening-saved" class="saved-mark"></span></div>
+            <label class="field"><span>今天一整天吃了什么？</span><textarea id="food" rows="5" placeholder="按早餐、午餐、晚餐和加餐记录，尽量写上大致分量"></textarea></label>
+            <label class="field"><span>饮食照片 <em>可选</em></span><input id="food-photos" type="file" accept="image/*" multiple /><div id="photo-preview" class="photo-preview"><div class="upload-hint">可上传餐食照片帮助 AI 判断搭配</div></div></label>
+            <div class="wellness-heading"><span>一整天排便情况</span><small>帮助教练调整纤维和饮水</small></div>
+            <div class="metrics">
+              <label class="field"><span>次数</span><select id="bowel-frequency"><option value="0">没有</option><option value="1" selected>1 次</option><option value="2">2 次</option><option value="3">3 次或以上</option></select></label>
+              <label class="field"><span>状态</span><select id="bowel-form"><option value="normal" selected>正常</option><option value="hard">偏硬/干结</option><option value="loose">偏稀</option><option value="watery">水样</option><option value="unknown">不确定</option></select></label>
+              <label class="field"><span>感受</span><select id="bowel-symptoms"><option value="none" selected>无明显不适</option><option value="straining">需要用力</option><option value="incomplete">没排干净</option><option value="bloating">伴随腹胀</option><option value="pain">疼痛/出血</option></select></label>
+            </div>
+            <small class="field-help">持续疼痛、出血或明显异常请咨询医生。</small>
+            <label class="field"><span>今晚还有什么感受？ <em>可选</em></span><input id="evening-notes" type="text" placeholder="例如：晚饭后很撑、今天喝水比较少" /></label>
+            <button id="evening-submit" class="primary-button" type="submit">完成今日复盘 <span>→</span></button>
+            <p class="privacy-note">照片会发送到你配置的 AI 服务分析，请勿上传敏感或可识别他人的照片。</p>
+          </form>
+        </div>
 
         <aside class="card plan-card" aria-live="polite">
           <div class="card-heading">
             <div>
               <p class="section-kicker">AI COACH RESPONSE</p>
-              <h2 id="plan-title">明日计划</h2>
+              <h2 id="plan-title">今日教练</h2>
             </div>
             <button id="clear-plan" class="text-button" type="button">清空</button>
           </div>
           <div id="empty-plan" class="empty-state">
             <div class="coach-icon">✦</div>
-            <h3>等你来打卡</h3>
-            <p>填写今天的状态后，我会根据你的目标、恢复情况和训练内容安排明天。</p>
+            <h3>从早上的状态开始</h3>
+            <p>我会陪你完成早上计划、训练后拉伸和晚上复盘，并在明早为今天评分。</p>
           </div>
           <div id="plan-content" class="plan-content hidden"></div>
         </aside>

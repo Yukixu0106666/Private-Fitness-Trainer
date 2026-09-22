@@ -1,20 +1,49 @@
 const $ = (id) => document.getElementById(id);
-const storageKey = "fitness-coach-records";
 const height = 158;
 const today = new Date();
 const isoDate = (date) => {
   const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
   return local.toISOString().slice(0, 10);
 };
-$("log-date").value = isoDate(today);
 
 let photos = [];
 let records = [];
-let currentUser = null;
 let registerMode = false;
+let activePhase = today.getHours() < 11 ? "morning" : today.getHours() < 18 ? "midday" : "evening";
+
+$("log-date").value = isoDate(today);
+
+function escapeHtml(value) {
+  return String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;");
+}
+
+function priorDate(dateString) {
+  const date = new Date(`${dateString}T12:00:00`);
+  if (Number.isNaN(date.getTime())) return "";
+  date.setDate(date.getDate() - 1);
+  return isoDate(date);
+}
+
+function currentRecord() {
+  return records.find((record) => record.date === $("log-date").value) || null;
+}
+
+function setValue(id, value, fallback = "") { $(id).value = value ?? fallback; }
+
+function addExerciseRow(name = "", duration = "") {
+  const row = document.createElement("div");
+  row.className = "exercise-row";
+  row.innerHTML = `<input class="exercise-name" type="text" placeholder="运动名称，如快走" value="${escapeHtml(name)}" /><div class="duration-input"><input class="exercise-duration" type="number" min="0" max="600" step="1" placeholder="30" value="${escapeHtml(duration)}" /><span>分钟</span></div><button class="remove-exercise" type="button" aria-label="删除这项运动">×</button>`;
+  row.querySelector(".remove-exercise").addEventListener("click", () => {
+    row.remove();
+    if (!$("exercise-list").children.length) addExerciseRow();
+  });
+  $("exercise-list").appendChild(row);
+}
+
+$("add-exercise").addEventListener("click", () => addExerciseRow());
 
 function showApp(user) {
-  currentUser = user;
   $("auth-card").classList.toggle("hidden", !!user);
   $("app-content").classList.toggle("hidden", !user);
   $("history-content").classList.toggle("hidden", !user);
@@ -24,7 +53,7 @@ function showApp(user) {
 }
 
 async function authRequest(path, body) {
-  const response = await fetch(path, { method: "POST", headers: {"Content-Type": "application/json"}, credentials: "same-origin", body: JSON.stringify(body) });
+  const response = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "same-origin", body: JSON.stringify(body) });
   const result = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(result.error || "操作失败");
   return result;
@@ -43,14 +72,10 @@ $("auth-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   $("auth-error").textContent = "";
   try {
-    const result = await authRequest(registerMode ? "/api/register" : "/api/login", {
-      email: $("auth-email").value, password: $("auth-password").value
-    });
+    const result = await authRequest(registerMode ? "/api/register" : "/api/login", { email: $("auth-email").value, password: $("auth-password").value });
     showApp(result.user);
     await loadRecords();
-  } catch (error) {
-    $("auth-error").textContent = error.message;
-  }
+  } catch (error) { $("auth-error").textContent = error.message; }
 });
 
 $("logout-button").addEventListener("click", async () => {
@@ -60,11 +85,18 @@ $("logout-button").addEventListener("click", async () => {
   showApp(null);
 });
 
+function switchPhase(phase, showSavedResponse = true) {
+  activePhase = phase;
+  document.querySelectorAll(".phase-tab").forEach((tab) => tab.classList.toggle("active", tab.dataset.phase === phase));
+  ["morning", "midday", "evening"].forEach((name) => $(`${name}-form`).classList.toggle("hidden", name !== phase));
+  if (showSavedResponse) renderSavedResponse();
+}
+
+document.querySelectorAll(".phase-tab").forEach((tab) => tab.addEventListener("click", () => switchPhase(tab.dataset.phase)));
+
 $("food-photos").addEventListener("change", (event) => {
   photos = Array.from(event.target.files || []);
-  $("photo-preview").innerHTML = photos.length
-    ? photos.map((photo) => `<img src="${URL.createObjectURL(photo)}" alt="饮食照片" />`).join("")
-    : '<div class="upload-hint">点击选择照片，帮助 AI 识别分量和搭配</div>';
+  $("photo-preview").innerHTML = photos.length ? photos.map((photo) => `<img src="${URL.createObjectURL(photo)}" alt="饮食照片" />`).join("") : '<div class="upload-hint">可上传餐食照片帮助 AI 判断搭配</div>';
 });
 
 const fileToDataUrl = (file) => new Promise((resolve, reject) => {
@@ -74,49 +106,91 @@ const fileToDataUrl = (file) => new Promise((resolve, reject) => {
   reader.readAsDataURL(file);
 });
 
-function renderPlan(plan) {
+function list(items) {
+  return Array.isArray(items) && items.length ? `<ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : "";
+}
+
+function renderCoachResponse(response, phase) {
+  if (!response) return showEmptyCoach();
   $("empty-plan").classList.add("hidden");
   $("plan-content").classList.remove("hidden");
-  $("plan-content").innerHTML = `<div class="plan-intro"><strong>明天的重点：${plan.title}</strong><br />${plan.summary}</div>
-    <div class="plan-section"><span class="tag">${plan.training?.loadLabel || "个性化安排"}</span><h3>训练安排</h3><ul>${(plan.training?.items || []).map((item) => `<li>${item}</li>`).join("")}</ul></div>
-    <div class="plan-section"><h3>饮食分析</h3><p>${plan.nutrition?.analysis || "暂无分析"}</p>${plan.nutrition?.estimatedCalories ? `<p>粗略估计：${plan.nutrition.estimatedCalories}</p>` : ""}</div>
-    <div class="plan-section"><h3>明日饮食提醒</h3><p>${plan.nutrition?.nextDayTip || "保持均衡饮食和充足饮水。"}</p></div>
-    <div class="plan-section"><h3>恢复与安全</h3><p>${plan.recovery || "训练时保持动作可控，不要在疼痛中训练。"}</p></div>
-    ${plan.disclaimer ? `<p class="privacy-note">${plan.disclaimer}</p>` : ""}`;
-  $("plan-title").textContent = plan.title;
+  $("plan-title").textContent = response.title || (phase === "morning" ? "今日计划" : phase === "midday" ? "拉伸建议" : "今日复盘");
+  if (phase === "morning") {
+    const evaluation = response.previousDayEvaluation;
+    const hasScore = evaluation && evaluation.score !== null && evaluation.score !== "" && Number.isFinite(Number(evaluation.score));
+    const score = hasScore ? `<div class="score-card"><div class="score-number">${escapeHtml(evaluation.score)}<small>/100</small></div><div><strong>昨天表现</strong><p>${escapeHtml(evaluation.summary)}</p></div></div>` : "";
+    const meals = response.meals || {};
+    $("plan-content").innerHTML = `${score}<div class="plan-intro"><strong>${escapeHtml(response.title)}</strong><br />${escapeHtml(response.summary)}</div>
+      <div class="plan-section"><span class="tag">${escapeHtml(response.training?.loadLabel || "今日训练")}</span><h3>今天的运动</h3>${list(response.training?.items)}</div>
+      <div class="plan-section"><h3>今天怎么吃</h3><div class="meal-grid"><p><strong>早餐</strong>${escapeHtml(meals.breakfast || "均衡早餐")}</p><p><strong>午餐</strong>${escapeHtml(meals.lunch || "均衡午餐")}</p><p><strong>晚餐</strong>${escapeHtml(meals.dinner || "均衡晚餐")}</p></div>${meals.principles ? `<p>${escapeHtml(meals.principles)}</p>` : ""}</div>
+      <div class="plan-section"><h3>恢复提醒</h3><p>${escapeHtml(response.recovery || "根据身体感受调整强度。")}</p></div>`;
+  } else if (phase === "midday") {
+    $("plan-content").innerHTML = `<div class="plan-intro"><strong>${escapeHtml(response.title)}</strong><br />${escapeHtml(response.summary)}</div><div class="plan-section"><span class="tag">${escapeHtml(response.stretch?.duration || "8–12 分钟")}</span><h3>现在这样拉伸</h3>${list(response.stretch?.items)}</div><div class="plan-section"><h3>安全提醒</h3><p>${escapeHtml(response.stretch?.safety || "拉伸保持轻柔，不要追求疼痛感。")}</p></div>`;
+  } else {
+    $("plan-content").innerHTML = `<div class="plan-intro"><strong>${escapeHtml(response.title)}</strong><br />${escapeHtml(response.summary)}</div><div class="plan-section"><h3>今天做得好的地方</h3>${list(response.wins)}</div><div class="plan-section"><h3>明早评分会关注</h3>${list(response.tomorrowScoreFactors)}</div><div class="plan-section"><h3>今晚提醒</h3><p>${escapeHtml(response.tonightTip || "早点休息并适量补水。")}</p></div>`;
+  }
+}
+
+function showEmptyCoach() {
+  $("empty-plan").classList.remove("hidden");
+  $("plan-content").classList.add("hidden");
+  $("plan-content").innerHTML = "";
+  $("plan-title").textContent = activePhase === "morning" ? "今日计划" : activePhase === "midday" ? "拉伸建议" : "今日复盘";
+}
+
+function renderSavedResponse() {
+  const record = currentRecord();
+  const response = activePhase === "morning" ? record?.plan : activePhase === "midday" ? record?.stretch : record?.eveningReview;
+  renderCoachResponse(response, activePhase);
+}
+
+function populateForms() {
+  const record = currentRecord() || {};
+  const morning = record.morning || record;
+  const midday = record.midday || record;
+  const evening = record.evening || record;
+  setValue("goal", record.goal, "fat-loss"); setValue("weight", morning.weight); setValue("sleep", morning.sleep, "7");
+  setValue("energy", morning.energy, "3"); setValue("soreness", morning.soreness, "2"); setValue("available-time", morning.availableTime, "45"); setValue("morning-notes", morning.notes);
+  $("exercise-list").innerHTML = "";
+  const exercises = Array.isArray(midday.exercises) && midday.exercises.length ? midday.exercises : midday.workout ? [{ name: midday.workout, duration: midday.duration || "" }] : [{ name: "", duration: "" }];
+  exercises.forEach((exercise) => addExerciseRow(exercise.name, exercise.duration));
+  setValue("plan-adherence", midday.planAdherence, "partial"); setValue("workout-effort", midday.effort, "3"); setValue("workout-notes", midday.notes);
+  setValue("food", evening.food); setValue("bowel-frequency", evening.bowelFrequency, "1"); setValue("bowel-form", evening.bowelForm, "normal"); setValue("bowel-symptoms", evening.bowelSymptoms, "none"); setValue("evening-notes", evening.notes);
+  $("morning-saved").textContent = record.morning || record.weight ? "✓ 已保存" : "";
+  $("midday-saved").textContent = record.midday ? "✓ 已保存" : "";
+  $("evening-saved").textContent = record.evening ? "✓ 已保存" : "";
+  renderSavedResponse();
 }
 
 function renderHistory() {
-  $("record-count").textContent = `${records.length} 条记录`;
-  $("history-list").innerHTML = records.length
-    ? records.slice(0, 14).map((record) => `<div class="history-item"><div class="history-date">${record.date}</div><div class="history-summary">${record.weight ? `${record.weight} kg（${record.weightTiming === "evening" ? "晚餐后" : record.weightTiming === "morning" ? "晨起" : "其他"}） · ` : ""}${record.plan.title} · 精力 ${record.energy}/5 · 睡眠 ${record.sleep} 小时${record.plan.nutrition?.estimatedCalories ? ` · ${record.plan.nutrition.estimatedCalories}` : ""}</div></div>`).join("")
-    : '<p class="muted">完成第一次打卡后，这里会显示你的记录。</p>';
+  $("record-count").textContent = `${records.length} 天记录`;
+  $("history-list").innerHTML = records.length ? records.slice(0, 14).map((record) => {
+    const nextRecord = records.find((item) => priorDate(item.date) === record.date);
+    const score = nextRecord?.plan?.previousDayEvaluation?.score;
+    const morning = record.morning || record;
+    const phases = [record.morning || record.weight, record.midday, record.evening].filter(Boolean).length;
+    return `<div class="history-item"><div class="history-date">${escapeHtml(record.date)}</div><div class="history-summary">${morning.weight ? `${escapeHtml(morning.weight)} kg · ` : ""}${phases}/3 阶段已记录${score !== undefined ? ` · 次日评分 ${escapeHtml(score)}/100` : " · 等待次日评分"}</div></div>`;
+  }).join("") : '<p class="muted">完成第一次早间打卡后，这里会显示你的记录。</p>';
 }
 
 function setStatus(text, state = "") {
   $("connection-status").className = `status-pill ${state}`;
-  $("connection-status").innerHTML = `<span></span> ${text}`;
+  $("connection-status").innerHTML = `<span></span> ${escapeHtml(text)}`;
 }
 
-async function requestPlan(data, imageData) {
-  const response = await fetch("/api/coach", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ checkIn: data, history: records.slice(0, 14), images: imageData })
-  });
+async function requestCoach(checkIn, imageData = []) {
+  const response = await fetch("/api/coach", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ checkIn, history: records.slice(0, 14), images: imageData }) });
   const result = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(result.error || "AI 教练暂时无法响应");
   return result.plan;
 }
 
 async function saveRecord(record) {
-  const response = await fetch("/api/records", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(record)
-  });
+  const response = await fetch("/api/records", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(record) });
   const result = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(result.error || "无法保存记录");
+  records = [record, ...records.filter((item) => item.date !== record.date)].sort((a, b) => b.date.localeCompare(a.date));
+  renderHistory(); populateForms();
 }
 
 async function loadRecords() {
@@ -125,57 +199,52 @@ async function loadRecords() {
   if (response.status === 401) return;
   if (!response.ok) throw new Error(result.error || "无法读取历史记录");
   records = Array.isArray(result.records) ? result.records : [];
-  renderHistory();
+  renderHistory(); populateForms();
 }
 
-$("daily-form").addEventListener("submit", async (event) => {
+async function runPhase({ phase, button, checkIn, images = [] }) {
+  const original = button.innerHTML;
+  button.disabled = true; button.textContent = "AI 教练正在分析…"; setStatus("AI 分析中…", "loading");
+  try {
+    const response = await requestCoach({ phase, ...checkIn }, images);
+    const existing = currentRecord() || { date: $("log-date").value, height };
+    const record = { ...existing, date: $("log-date").value, height, goal: $("goal").value };
+    if (phase === "morning") Object.assign(record, { morning: checkIn, plan: response });
+    if (phase === "midday") Object.assign(record, { midday: checkIn, stretch: response, plan: record.plan || { title: "未生成早间计划" } });
+    if (phase === "evening") Object.assign(record, { evening: checkIn, eveningReview: response, plan: record.plan || { title: "未生成早间计划" } });
+    await saveRecord(record);
+    renderCoachResponse(response, phase); setStatus("AI 教练 · 已连接");
+  } catch (error) {
+    setStatus("AI 服务未连接", "error"); $("empty-plan").classList.add("hidden"); $("plan-content").classList.remove("hidden");
+    $("plan-content").innerHTML = `<div class="plan-intro"><strong>这次没有保存</strong><br />${escapeHtml(error.message)}</div>`;
+  } finally { button.disabled = false; button.innerHTML = original; }
+}
+
+$("morning-form").addEventListener("submit", (event) => {
   event.preventDefault();
-  const button = $("submit-button");
-  const data = {
-    date: $("log-date").value, goal: $("goal").value, height,
-    weight: $("weight").value, weightTiming: $("weight-timing").value,
-    food: $("food").value.trim(),
-    foodStatus: document.querySelector('input[name="food-status"]:checked').value,
-    bowelFrequency: $("bowel-frequency").value, bowelForm: $("bowel-form").value,
-    bowelSymptoms: $("bowel-symptoms").value,
-    workout: $("workout").value.trim(), energy: $("energy").value, soreness: $("soreness").value,
-    sleep: $("sleep").value, notes: $("notes").value.trim()
-  };
-  button.disabled = true;
-  button.innerHTML = "AI 正在分析照片和训练历史…";
-  setStatus("AI 分析中…", "loading");
+  runPhase({ phase: "morning", button: $("morning-submit"), checkIn: { date: $("log-date").value, goal: $("goal").value, height, weight: $("weight").value, sleep: $("sleep").value, energy: $("energy").value, soreness: $("soreness").value, availableTime: $("available-time").value, notes: $("morning-notes").value.trim(), previousDay: records.find((record) => record.date === priorDate($("log-date").value)) || null } });
+});
+
+$("midday-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const existing = currentRecord();
+  const exercises = Array.from(document.querySelectorAll(".exercise-row")).map((row) => ({ name: row.querySelector(".exercise-name").value.trim(), duration: row.querySelector(".exercise-duration").value })).filter((exercise) => exercise.name || exercise.duration);
+  runPhase({ phase: "midday", button: $("midday-submit"), checkIn: { date: $("log-date").value, exercises, totalDuration: exercises.reduce((sum, exercise) => sum + (Number(exercise.duration) || 0), 0), planAdherence: $("plan-adherence").value, effort: $("workout-effort").value, notes: $("workout-notes").value.trim(), todayPlan: existing?.plan || null, morningState: existing?.morning || null } });
+});
+
+$("evening-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const existing = currentRecord();
   try {
     const imageData = await Promise.all(photos.map(fileToDataUrl));
-    const plan = await requestPlan(data, imageData);
-    const record = { ...data, plan };
-    await saveRecord(record);
-    records = [record, ...records.filter((item) => item.date !== data.date)];
-    localStorage.setItem(storageKey, JSON.stringify(records));
-    renderPlan(plan);
-    renderHistory();
-    setStatus("AI 教练 · 已连接");
-  } catch (error) {
-    setStatus("AI 服务未连接", "error");
-    $("plan-content").classList.remove("hidden");
-    $("empty-plan").classList.add("hidden");
-    $("plan-title").textContent = "需要配置 AI";
-    $("plan-content").innerHTML = `<div class="plan-intro"><strong>这次没有生成计划</strong><br />${error.message}</div><div class="plan-section"><p>请确认已启动后端，并在 <code>.env</code> 中设置 OPENAI_API_KEY。你的反馈没有被保存。</p></div>`;
-  } finally {
-    button.disabled = false;
-    button.innerHTML = "让 AI 教练分析 <span>→</span>";
-  }
+    runPhase({ phase: "evening", button: $("evening-submit"), images: imageData, checkIn: { date: $("log-date").value, food: $("food").value.trim(), bowelFrequency: $("bowel-frequency").value, bowelForm: $("bowel-form").value, bowelSymptoms: $("bowel-symptoms").value, notes: $("evening-notes").value.trim(), morningState: existing?.morning || null, workoutResult: existing?.midday || null, todayPlan: existing?.plan || null } });
+  } catch (error) { setStatus(error.message, "error"); }
 });
 
-$("clear-plan").addEventListener("click", () => {
-  $("empty-plan").classList.remove("hidden");
-  $("plan-content").classList.add("hidden");
-  $("plan-content").innerHTML = "";
-  $("plan-title").textContent = "明日计划";
-});
+$("log-date").addEventListener("change", populateForms);
+$("clear-plan").addEventListener("click", showEmptyCoach);
+switchPhase(activePhase, false);
 
-fetch("/api/me", { credentials: "same-origin" }).then((response) => response.json()).then(async ({user}) => {
-  if (user) {
-    showApp(user);
-    await loadRecords();
-  }
+fetch("/api/me", { credentials: "same-origin" }).then((response) => response.json()).then(async ({ user }) => {
+  if (user) { showApp(user); await loadRecords(); }
 }).catch(() => setStatus("记录服务未连接", "error"));
