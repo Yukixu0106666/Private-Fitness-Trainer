@@ -77,7 +77,11 @@
 
           <label class="field food-photo-label">
             <span>饮食照片 <em>可选</em></span>
-            <input id="food-photos" type="file" accept="image/*" multiple />
+            <div class="upload-control">
+              <label id="food-photos-button" class="upload-button" for="food-photos">选择文件</label>
+              <span id="food-photos-name" class="upload-name">未选择任何文件</span>
+            </div>
+            <input id="food-photos" class="visually-hidden" type="file" accept="image/*" multiple />
             <div id="photo-preview" class="photo-preview">
               <div class="upload-hint">点击选择照片，帮助 AI 识别分量和搭配</div>
             </div>
@@ -120,7 +124,7 @@
           </div>
           <small id="bowel-help" class="field-help">只记录你愿意分享的信息；持续疼痛、出血或明显异常请咨询医生。</small>
 
-          <label class="field notes-label">
+          <label class="field">
             <span>今天完成的训练</span>
             <textarea id="workout" rows="3" placeholder="例如：深蹲 4×8、卧推 3×10，快走 20 分钟"></textarea>
           </label>
@@ -152,7 +156,7 @@
             </label>
           </div>
 
-          <label class="field">
+          <label class="field notes-label">
             <span>特别想让教练注意什么？ <em>可选</em></span>
             <input id="notes" type="text" placeholder="例如：右膝有点不舒服，明天只有 30 分钟" />
           </label>

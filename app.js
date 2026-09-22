@@ -127,6 +127,8 @@ const translations = {
     energyShort: "精力",
     hours: "小时",
     cannotRead: "无法读取照片："
+    ,chooseFile: "选择文件"
+    ,noFile: "未选择任何文件"
   },
   en: {
     pageTitle: "My Fitness Coach",
@@ -239,6 +241,8 @@ const translations = {
     energyShort: "Energy",
     hours: "hours",
     cannotRead: "Unable to read photo: "
+    ,chooseFile: "Choose files"
+    ,noFile: "No files selected"
   }
 };
 
@@ -317,6 +321,8 @@ function applyLanguage() {
   [["1", "barely"], ["2", "slight"], ["3", "moderate"], ["4", "noticeable"], ["5", "severe"]].forEach(([value, key]) => setText(`#soreness option[value="${value}"]`, key));
   setFieldLabel("sleep", "sleep");
   setOptionalLabel(".notes-label > span", "notes");
+  setText("#food-photos-button", "chooseFile");
+  setText("#food-photos-name", "noFile");
   $("notes").placeholder = t("notesPlaceholder");
   $("submit-button").innerHTML = `${t("analyze")} <span>→</span>`;
   setText(".privacy-note", "privacy");
@@ -388,6 +394,9 @@ $("logout-button").addEventListener("click", async () => {
 
 $("food-photos").addEventListener("change", (event) => {
   photos = Array.from(event.target.files || []);
+  $("food-photos-name").textContent = photos.length
+    ? photos.map((photo) => photo.name).join(", ")
+    : t("noFile");
   $("photo-preview").innerHTML = photos.length
     ? photos.map((photo) => `<img src="${URL.createObjectURL(photo)}" alt="饮食照片" />`).join("")
     : `<div class="upload-hint">${t("photoHint")}</div>`;
@@ -404,7 +413,7 @@ function renderPlan(plan) {
   currentPlan = plan;
   $("empty-plan").classList.add("hidden");
   $("plan-content").classList.remove("hidden");
-  $("plan-content").innerHTML = `<div class="plan-intro"><strong>明天的重点：${plan.title}</strong><br />${plan.summary}</div>
+  $("plan-content").innerHTML = `<div class="plan-intro"><strong>${t("planFocus")}${plan.title}</strong><br />${plan.summary}</div>
     <div class="plan-section"><span class="tag">${plan.training?.loadLabel || t("personalized")}</span><h3>${t("training")}</h3><ul>${(plan.training?.items || []).map((item) => `<li>${item}</li>`).join("")}</ul></div>
     <div class="plan-section"><h3>${t("nutrition")}</h3><p>${plan.nutrition?.analysis || t("noAnalysis")}</p>${plan.nutrition?.estimatedCalories ? `<p>${language === "en" ? "Estimated:" : "粗略估计："} ${plan.nutrition.estimatedCalories}</p>` : ""}</div>
     <div class="plan-section"><h3>${t("nextDayFood")}</h3><p>${plan.nutrition?.nextDayTip || t("balanced")}</p></div>
