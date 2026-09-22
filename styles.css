@@ -97,6 +97,11 @@ input:hover, textarea:hover, select:hover { background: #fff; border-color: #c8d
 input:focus, textarea:focus, select:focus { background: #fff; border-color: #75a886; box-shadow: 0 0 0 3px rgba(117, 168, 134, .16); }
 textarea { min-height: 92px; resize: vertical; }
 input[type="file"] { padding: 8px; }
+.visually-hidden { height: 1px; opacity: 0; overflow: hidden; position: absolute; width: 1px; }
+.upload-control { align-items: center; background: #fbfdfb; border: 1px solid var(--line); border-radius: var(--radius-md); display: flex; gap: 10px; min-height: 44px; padding: 5px 10px; }
+.upload-button { background: var(--mint); border-radius: 7px; color: var(--green-dark); cursor: pointer; font-size: 12px; font-weight: 700; padding: 8px 10px; }
+.upload-button:hover { background: var(--mint-strong); }
+.upload-name { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .metrics { display: grid; gap: 12px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .profile-metrics { grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); }
