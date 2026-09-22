@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>我的健身教练</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">DAILY FITNESS AGENT</p>
+          <h1>我的健身教练</h1>
+          <p class="subtitle">记录今天，获得更适合明天的训练建议。</p>
+        </div>
+        <div><div id="connection-status" class="status-pill"><span></span> AI 教练 · 等待配置</div><button id="logout-button" class="text-button hidden" type="button">退出登录</button></div>
+      </header>
+
+      <section id="auth-card" class="card auth-card">
+        <div class="card-heading"><div><p class="section-kicker">YOUR ACCOUNT</p><h2 id="auth-title">登录</h2></div><span id="auth-user" class="muted"></span></div>
+        <form id="auth-form">
+          <label class="field"><span>邮箱</span><input id="auth-email" type="email" required autocomplete="email" /></label>
+          <label class="field"><span>密码（至少 8 位）</span><input id="auth-password" type="password" required minlength="8" autocomplete="current-password" /></label>
+          <p id="auth-error" class="auth-error"></p>
+          <button id="auth-submit" class="primary-button" type="submit">登录</button>
+        </form>
+        <button id="auth-toggle" class="text-button" type="button">还没有账号？注册</button>
+      </section>
+
+      <section id="app-content" class="grid hidden">
+        <form id="daily-form" class="card form-card">
+          <div class="card-heading">
+            <div>
+              <p class="section-kicker">TODAY'S CHECK-IN</p>
+              <h2>今天的反馈</h2>
+            </div>
+            <input id="log-date" class="date-input" type="date" required />
+          </div>
+
+          <label class="field">
+            <span>你的目标</span>
+            <select id="goal">
+              <option value="fat-loss">减脂塑形</option>
+              <option value="muscle">增肌增力</option>
+              <option value="fitness">提升体能</option>
+              <option value="health">保持健康</option>
+            </select>
+          </label>
+
+          <div class="metrics profile-metrics">
+            <label class="field">
+              <span>今天体重（kg）</span>
+              <input id="weight" type="number" min="20" max="300" step="0.01" placeholder="例如：55.05" required />
+            </label>
+            <label class="field">
+              <span>测量时间</span>
+              <select id="weight-timing">
+                <option value="morning">晨起空腹</option>
+                <option value="evening">晚餐后</option>
+                <option value="other">其他时间</option>
+              </select>
+            </label>
+          </div>
+          <small class="field-help">长期趋势请优先比较每天晨起、如厕、早餐前的体重；晚餐后的数据会单独标记。</small>
+
+          <label class="field">
+            <span>今天吃了什么？</span>
+            <textarea id="food" rows="3" placeholder="例如：早餐鸡蛋和燕麦；午餐牛肉、米饭和西兰花……"></textarea>
+          </label>
+
+          <fieldset class="field radio-field">
+            <legend>饮食记录状态</legend>
+            <label><input type="radio" name="food-status" value="partial" checked /> 目前为止的部分记录</label>
+            <label><input type="radio" name="food-status" value="complete" /> 今天全天已完成</label>
+          </fieldset>
+
+          <label class="field">
+            <span>饮食照片 <em>可选</em></span>
+            <input id="food-photos" type="file" accept="image/*" multiple />
+            <div id="photo-preview" class="photo-preview">
+              <div class="upload-hint">点击选择照片，帮助 AI 识别分量和搭配</div>
+            </div>
+          </label>
+
+          <div class="wellness-heading">
+            <span>排便情况</span>
+            <small>帮助教练调整纤维和饮水</small>
+          </div>
+          <div class="metrics">
+            <label class="field">
+              <span>今天次数</span>
+              <select id="bowel-frequency">
+                <option value="0">没有</option>
+                <option value="1" selected>1 次</option>
+                <option value="2">2 次</option>
+                <option value="3">3 次或以上</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>大便状态</span>
+              <select id="bowel-form">
+                <option value="normal" selected>正常</option>
+                <option value="hard">偏硬/干结</option>
+                <option value="loose">偏稀</option>
+                <option value="watery">水样</option>
+                <option value="unknown">不确定</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>排便感受</span>
+              <select id="bowel-symptoms">
+                <option value="none" selected>无明显不适</option>
+                <option value="straining">需要用力</option>
+                <option value="incomplete">总觉得没排干净</option>
+                <option value="bloating">伴随腹胀</option>
+                <option value="pain">有疼痛/出血</option>
+              </select>
+            </label>
+          </div>
+          <small class="field-help">只记录你愿意分享的信息；持续疼痛、出血或明显异常请咨询医生。</small>
+
+          <label class="field">
+            <span>今天完成的训练</span>
+            <textarea id="workout" rows="3" placeholder="例如：深蹲 4×8、卧推 3×10，快走 20 分钟"></textarea>
+          </label>
+
+          <div class="metrics">
+            <label class="field">
+              <span>精力</span>
+              <select id="energy">
+                <option value="5">5 · 很好</option>
+                <option value="4">4 · 不错</option>
+                <option value="3" selected>3 · 一般</option>
+                <option value="2">2 · 较低</option>
+                <option value="1">1 · 很差</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>肌肉酸痛</span>
+              <select id="soreness">
+                <option value="1">1 · 几乎没有</option>
+                <option value="2" selected>2 · 轻微</option>
+                <option value="3">3 · 中等</option>
+                <option value="4">4 · 明显</option>
+                <option value="5">5 · 很严重</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>睡眠（小时）</span>
+              <input id="sleep" type="number" min="0" max="24" step="0.5" value="7" />
+            </label>
+          </div>
+
+          <label class="field">
+            <span>特别想让教练注意什么？ <em>可选</em></span>
+            <input id="notes" type="text" placeholder="例如：右膝有点不舒服，明天只有 30 分钟" />
+          </label>
+
+          <button id="submit-button" class="primary-button" type="submit">让 AI 教练分析 <span>→</span></button>
+          <p class="privacy-note">提交后照片会发送到你配置的 AI 服务进行识别。不要上传敏感或可识别他人的照片。</p>
+        </form>
+
+        <aside class="card plan-card" aria-live="polite">
+          <div class="card-heading">
+            <div>
+              <p class="section-kicker">AI COACH RESPONSE</p>
+              <h2 id="plan-title">明日计划</h2>
+            </div>
+            <button id="clear-plan" class="text-button" type="button">清空</button>
+          </div>
+          <div id="empty-plan" class="empty-state">
+            <div class="coach-icon">✦</div>
+            <h3>等你来打卡</h3>
+            <p>填写今天的状态后，我会根据你的目标、恢复情况和训练内容安排明天。</p>
+          </div>
+          <div id="plan-content" class="plan-content hidden"></div>
+        </aside>
+      </section>
+
+      <section class="card history-card hidden" id="history-content">
+        <div class="card-heading">
+          <div>
+            <p class="section-kicker">YOUR JOURNEY</p>
+            <h2>最近记录</h2>
+          </div>
+          <span id="record-count" class="record-count">0 条记录</span>
+        </div>
+        <div id="history-list" class="history-list">
+          <p class="muted">完成第一次打卡后，这里会显示你的记录。</p>
+        </div>
+      </section>
+
+      <footer id="app-footer" class="hidden">健康建议不能替代医生或持证教练的诊断。出现疼痛、胸闷、眩晕等症状时请停止训练并寻求专业帮助。</footer>
+    </main>
+    <script src="app.js"></script>
+  </body>
+</html>
