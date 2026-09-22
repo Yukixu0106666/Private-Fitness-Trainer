@@ -14,7 +14,7 @@
           <h1>我的健身教练</h1>
           <p class="subtitle">记录今天，获得更适合明天的训练建议。</p>
         </div>
-        <div><div id="connection-status" class="status-pill"><span></span> AI 教练 · 等待配置</div><button id="logout-button" class="text-button hidden" type="button">退出登录</button></div>
+        <div><div id="connection-status" class="status-pill"><span></span> AI 教练 · 等待配置</div><button id="language-toggle" class="text-button" type="button">English</button><button id="logout-button" class="text-button hidden" type="button">退出登录</button></div>
       </header>
 
       <section id="auth-card" class="card auth-card">
@@ -62,7 +62,7 @@
               </select>
             </label>
           </div>
-          <small class="field-help">长期趋势请优先比较每天晨起、如厕、早餐前的体重；晚餐后的数据会单独标记。</small>
+          <small id="weight-help" class="field-help">长期趋势请优先比较每天晨起、如厕、早餐前的体重；晚餐后的数据会单独标记。</small>
 
           <label class="field">
             <span>今天吃了什么？</span>
@@ -71,11 +71,11 @@
 
           <fieldset class="field radio-field">
             <legend>饮食记录状态</legend>
-            <label><input type="radio" name="food-status" value="partial" checked /> 目前为止的部分记录</label>
-            <label><input type="radio" name="food-status" value="complete" /> 今天全天已完成</label>
+            <label id="food-status-partial"><input type="radio" name="food-status" value="partial" checked /> 目前为止的部分记录</label>
+            <label id="food-status-complete"><input type="radio" name="food-status" value="complete" /> 今天全天已完成</label>
           </fieldset>
 
-          <label class="field">
+          <label class="field food-photo-label">
             <span>饮食照片 <em>可选</em></span>
             <input id="food-photos" type="file" accept="image/*" multiple />
             <div id="photo-preview" class="photo-preview">
@@ -118,9 +118,9 @@
               </select>
             </label>
           </div>
-          <small class="field-help">只记录你愿意分享的信息；持续疼痛、出血或明显异常请咨询医生。</small>
+          <small id="bowel-help" class="field-help">只记录你愿意分享的信息；持续疼痛、出血或明显异常请咨询医生。</small>
 
-          <label class="field">
+          <label class="field notes-label">
             <span>今天完成的训练</span>
             <textarea id="workout" rows="3" placeholder="例如：深蹲 4×8、卧推 3×10，快走 20 分钟"></textarea>
           </label>
