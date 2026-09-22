@@ -196,6 +196,7 @@ def call_model(payload):
 def prompt_for(body):
     check_in, history, images = body.get("checkIn", {}), body.get("history", [])[:14], body.get("images", [])
     phase = check_in.get("phase", "morning")
+    language = "English" if body.get("language") == "en" else "Chinese"
     phase_tasks = {
         "morning": """这是早间教练。根据今早体重、睡眠、精力、酸痛、可用时间、最近14天趋势和前一天完整记录，制定今天三餐与运动计划。若有前一天记录，用模型综合完成度、运动量、饮食结构、排便、恢复和目标给前一天打0-100分；评分必须解释依据，不得因为减重越多就机械加分。若没有前一天记录，score必须为null。输出严格JSON：
 {"title":"今日重点，不超过20字","summary":"两句以内","previousDayEvaluation":{"date":"被评分日期或空字符串","score":null,"summary":"评分说明","wins":["优点"],"improve":["改进点"]},"meals":{"breakfast":"具体早餐","lunch":"具体午餐","dinner":"具体晚餐","principles":"份量、蛋白质和饮水原则"},"training":{"loadLabel":"训练强度","items":["4-6条含动作、组数或时间的安排"]},"recovery":"安全和恢复提醒"}""",
@@ -204,12 +205,12 @@ def prompt_for(body):
         "evening": """这是晚间复盘教练。结合今天早间状态与计划、实际运动、全天饮食、排便和用户感受做简短复盘，不提前给出最终分数；说明明早模型评分会参考哪些实际数据。不要诊断疾病或精确估算无法确认的热量。输出严格JSON：
 {"title":"今日复盘，不超过20字","summary":"两句以内","wins":["1-3条今天做得好的地方"],"tomorrowScoreFactors":["2-4条明早评分会参考的因素"],"tonightTip":"今晚可执行的恢复建议"}""",
     }
-    task = phase_tasks.get(phase, phase_tasks["morning"])
+    task = phase_tasks.get(phase, phase_tasks["morning"]) + f"\nEvery user-facing JSON value must be written in {language}."
     content = [{"type": "text", "text": json.dumps({"本次阶段": phase, "本次反馈": check_in, "最近14天历史": history, "任务": task}, ensure_ascii=False)}]
     for image in images[:4]:
         if isinstance(image, str) and image.startswith("data:image/"):
             content.append({"type": "image_url", "image_url": {"url": image, "detail": "low"}})
-    system = """你是一名谨慎的中文健身教练 Agent。你通过一天中早间、训练后、晚间三个阶段连续工作。必须只输出任务指定结构的有效 JSON，不要 Markdown。建议应具体、温和、可执行；不得诊断疾病。评分属于基于历史记录的模型估计而非医学结论，并应避免体重数字偏见。"""
+    system = f"""你是一名谨慎的健身教练 Agent。你通过一天中早间、训练后、晚间三个阶段连续工作。必须只输出任务指定结构的有效 JSON，不要 Markdown。所有面向用户的JSON值必须使用{language}。建议应具体、温和、可执行；不得诊断疾病。评分属于基于历史记录的模型估计而非医学结论，并应避免体重数字偏见。"""
     return [{"role": "system", "content": system}, {"role": "user", "content": content}]
 
 

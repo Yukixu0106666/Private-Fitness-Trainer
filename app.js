@@ -10,6 +10,61 @@ let photos = [];
 let records = [];
 let registerMode = false;
 let activePhase = today.getHours() < 11 ? "morning" : today.getHours() < 18 ? "midday" : "evening";
+let language = localStorage.getItem("fitness-coach-language") || "zh";
+
+const enText = {
+  "我的健身教练": "My Fitness Coach", "记录今天，获得更适合明天的训练建议。": "Log today and get guidance for a better tomorrow.",
+  "退出登录": "Log out", "登录": "Log in", "注册": "Sign up", "邮箱": "Email", "密码（至少 8 位）": "Password (at least 8 characters)",
+  "还没有账号？注册": "No account yet? Sign up", "已有账号？登录": "Already have an account? Log in", "注册并登录": "Sign up and log in",
+  "今天的教练": "Today's coach", "早": "AM", "中": "MID", "晚": "PM", "早上计划": "Morning plan", "状态与今日安排": "Status and daily plan",
+  "训练完成": "Workout done", "运动与拉伸": "Exercise and stretching", "晚上复盘": "Evening review", "饮食与排便": "Food and digestion",
+  "早上好，先看看今天的身体状态": "Good morning — let's check how your body feels", "你的目标": "Your goal", "减脂塑形": "Fat loss & shaping",
+  "增肌增力": "Build muscle & strength", "提升体能": "Improve fitness", "保持健康": "Stay healthy", "晨起体重（kg）": "Morning weight (kg)",
+  "睡眠（小时）": "Sleep (hours)", "建议晨起、如厕、早餐前称重，趋势更有参考价值。": "For a useful trend, weigh after using the bathroom and before breakfast.",
+  "精力": "Energy", "肌肉酸痛": "Muscle soreness", "可运动时间": "Time available", "身体不适或特别安排": "Pain or special considerations",
+  "可选": "Optional", "生成今天的饮食与运动计划": "Create today's meal and workout plan", "练完了，记录实际完成情况": "Workout complete — log what you actually did",
+  "做了哪些运动，各做了多久？": "Which exercises did you do, and for how long?", "＋ 添加一项运动": "+ Add exercise",
+  "是否按早上建议完成": "Followed the morning plan?", "全部完成": "Completed all", "完成一部分": "Completed part", "做了其他运动": "Did a different workout",
+  "今天没做": "No workout today", "实际强度": "Perceived effort", "训练后感觉": "How did you feel afterward?", "生成训练后拉伸建议": "Create post-workout stretches",
+  "晚上好，完成今天的饮食与身体复盘": "Good evening — finish today's food and body review", "今天一整天吃了什么？": "What did you eat today?",
+  "饮食照片": "Food photos", "可上传餐食照片帮助 AI 判断搭配": "Upload meal photos to help AI review food balance", "一整天排便情况": "Bowel movements today",
+  "帮助教练调整纤维和饮水": "Helps adjust fiber and hydration", "次数": "Count", "没有": "None", "1 次": "Once", "2 次": "Twice", "3 次或以上": "3 or more",
+  "状态": "Consistency", "正常": "Normal", "偏硬/干结": "Hard / dry", "偏稀": "Loose", "水样": "Watery", "不确定": "Not sure", "感受": "Symptoms",
+  "无明显不适": "No discomfort", "需要用力": "Straining", "没排干净": "Incomplete", "伴随腹胀": "Bloating", "疼痛/出血": "Pain / bleeding",
+  "持续疼痛、出血或明显异常请咨询医生。": "Consult a doctor for persistent pain, bleeding, or unusual symptoms.", "今晚还有什么感受？": "Anything else tonight?",
+  "完成今日复盘": "Complete today's review", "照片会发送到你配置的 AI 服务分析，请勿上传敏感或可识别他人的照片。": "Photos are sent to your configured AI service. Do not upload sensitive or identifying images.",
+  "今日教练": "Today's coach", "清空": "Clear", "从早上的状态开始": "Start with your morning check-in", "我会陪你完成早上计划、训练后拉伸和晚上复盘，并在明早为今天评分。": "I'll guide your morning plan, post-workout stretch, and evening review, then score today tomorrow morning.",
+  "最近记录": "Recent records", "0 条记录": "0 records", "完成第一次打卡后，这里会显示你的记录。": "Your records will appear after your first check-in.",
+  "健康建议不能替代医生或持证教练的诊断。出现疼痛、胸闷、眩晕等症状时请停止训练并寻求专业帮助。": "Health guidance does not replace a doctor or certified trainer. Stop and seek help for pain, chest tightness, or dizziness.",
+  "很好": "Very good", "不错": "Good", "一般": "Average", "较低": "Low", "很差": "Very low", "几乎没有": "Almost none", "轻微": "Slight", "中等": "Moderate", "明显": "Noticeable", "很严重": "Severe",
+  "很轻松": "Very easy", "适中": "Moderate", "较累": "Hard", "非常累": "Very hard", "分钟": "min", "已保存": "Saved"
+};
+const originalText = new WeakMap();
+const originalPlaceholder = new WeakMap();
+const tr = (text) => language === "en" ? (enText[text] || text) : text;
+
+function applyLanguage() {
+  document.documentElement.lang = language === "en" ? "en" : "zh-CN";
+  document.title = tr("我的健身教练");
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  let node;
+  while ((node = walker.nextNode())) {
+    if (!originalText.has(node)) originalText.set(node, node.nodeValue);
+    const original = originalText.get(node);
+    const trimmed = original.trim();
+    node.nodeValue = trimmed ? original.replace(trimmed, tr(trimmed)) : original;
+  }
+  document.querySelectorAll("[placeholder]").forEach((element) => {
+    if (!originalPlaceholder.has(element)) originalPlaceholder.set(element, element.placeholder);
+    const original = originalPlaceholder.get(element);
+    element.placeholder = language === "en" ? ({
+      "例如：55.05": "e.g. 55.05", "例如：右膝不舒服，今天只能在家练": "e.g. My right knee hurts; I can only train at home",
+      "例如：腿比较紧，左肩活动时不舒服": "e.g. Tight legs and left shoulder discomfort", "按早餐、午餐、晚餐和加餐记录，尽量写上大致分量": "List breakfast, lunch, dinner, snacks, and approximate portions",
+      "例如：晚饭后很撑、今天喝水比较少": "e.g. Felt too full after dinner and drank little water"
+    }[original] || original) : original;
+  });
+  $("language-toggle").textContent = language === "en" ? "中文" : "English";
+}
 
 $("log-date").value = isoDate(today);
 
@@ -55,15 +110,15 @@ function showApp(user) {
 async function authRequest(path, body) {
   const response = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "same-origin", body: JSON.stringify(body) });
   const result = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(result.error || "操作失败");
+  if (!response.ok) throw new Error(result.error || (language === "en" ? "Action failed" : "操作失败"));
   return result;
 }
 
 $("auth-toggle").addEventListener("click", () => {
   registerMode = !registerMode;
-  $("auth-title").textContent = registerMode ? "注册" : "登录";
-  $("auth-submit").textContent = registerMode ? "注册并登录" : "登录";
-  $("auth-toggle").textContent = registerMode ? "已有账号？登录" : "还没有账号？注册";
+  $("auth-title").textContent = tr(registerMode ? "注册" : "登录");
+  $("auth-submit").textContent = tr(registerMode ? "注册并登录" : "登录");
+  $("auth-toggle").textContent = tr(registerMode ? "已有账号？登录" : "还没有账号？注册");
   $("auth-password").autocomplete = registerMode ? "new-password" : "current-password";
   $("auth-error").textContent = "";
 });
@@ -94,6 +149,14 @@ function switchPhase(phase, showSavedResponse = true) {
 
 document.querySelectorAll(".phase-tab").forEach((tab) => tab.addEventListener("click", () => switchPhase(tab.dataset.phase)));
 
+$("language-toggle").addEventListener("click", () => {
+  language = language === "zh" ? "en" : "zh";
+  localStorage.setItem("fitness-coach-language", language);
+  applyLanguage();
+  renderHistory();
+  renderSavedResponse();
+});
+
 $("food-photos").addEventListener("change", (event) => {
   photos = Array.from(event.target.files || []);
   $("photo-preview").innerHTML = photos.length ? photos.map((photo) => `<img src="${URL.createObjectURL(photo)}" alt="饮食照片" />`).join("") : '<div class="upload-hint">可上传餐食照片帮助 AI 判断搭配</div>';
@@ -102,7 +165,7 @@ $("food-photos").addEventListener("change", (event) => {
 const fileToDataUrl = (file) => new Promise((resolve, reject) => {
   const reader = new FileReader();
   reader.onload = () => resolve(reader.result);
-  reader.onerror = () => reject(new Error(`无法读取照片：${file.name}`));
+  reader.onerror = () => reject(new Error(`${language === "en" ? "Could not read image: " : "无法读取照片："}${file.name}`));
   reader.readAsDataURL(file);
 });
 
@@ -129,6 +192,7 @@ function renderCoachResponse(response, phase) {
   } else {
     $("plan-content").innerHTML = `<div class="plan-intro"><strong>${escapeHtml(response.title)}</strong><br />${escapeHtml(response.summary)}</div><div class="plan-section"><h3>今天做得好的地方</h3>${list(response.wins)}</div><div class="plan-section"><h3>明早评分会关注</h3>${list(response.tomorrowScoreFactors)}</div><div class="plan-section"><h3>今晚提醒</h3><p>${escapeHtml(response.tonightTip || "早点休息并适量补水。")}</p></div>`;
   }
+  applyLanguage();
 }
 
 function showEmptyCoach() {
@@ -136,6 +200,7 @@ function showEmptyCoach() {
   $("plan-content").classList.add("hidden");
   $("plan-content").innerHTML = "";
   $("plan-title").textContent = activePhase === "morning" ? "今日计划" : activePhase === "midday" ? "拉伸建议" : "今日复盘";
+  applyLanguage();
 }
 
 function renderSavedResponse() {
@@ -160,6 +225,7 @@ function populateForms() {
   $("midday-saved").textContent = record.midday ? "✓ 已保存" : "";
   $("evening-saved").textContent = record.evening ? "✓ 已保存" : "";
   renderSavedResponse();
+  applyLanguage();
 }
 
 function renderHistory() {
@@ -171,6 +237,7 @@ function renderHistory() {
     const phases = [record.morning || record.weight, record.midday, record.evening].filter(Boolean).length;
     return `<div class="history-item"><div class="history-date">${escapeHtml(record.date)}</div><div class="history-summary">${morning.weight ? `${escapeHtml(morning.weight)} kg · ` : ""}${phases}/3 阶段已记录${score !== undefined ? ` · 次日评分 ${escapeHtml(score)}/100` : " · 等待次日评分"}</div></div>`;
   }).join("") : '<p class="muted">完成第一次早间打卡后，这里会显示你的记录。</p>';
+  applyLanguage();
 }
 
 function setStatus(text, state = "") {
@@ -179,16 +246,16 @@ function setStatus(text, state = "") {
 }
 
 async function requestCoach(checkIn, imageData = []) {
-  const response = await fetch("/api/coach", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ checkIn, history: records.slice(0, 14), images: imageData }) });
+  const response = await fetch("/api/coach", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ checkIn, history: records.slice(0, 14), images: imageData, language }) });
   const result = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(result.error || "AI 教练暂时无法响应");
+  if (!response.ok) throw new Error(result.error || (language === "en" ? "AI coach is temporarily unavailable" : "AI 教练暂时无法响应"));
   return result.plan;
 }
 
 async function saveRecord(record) {
   const response = await fetch("/api/records", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(record) });
   const result = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(result.error || "无法保存记录");
+  if (!response.ok) throw new Error(result.error || (language === "en" ? "Could not save record" : "无法保存记录"));
   records = [record, ...records.filter((item) => item.date !== record.date)].sort((a, b) => b.date.localeCompare(a.date));
   renderHistory(); populateForms();
 }
@@ -197,14 +264,14 @@ async function loadRecords() {
   const response = await fetch("/api/records", { credentials: "same-origin" });
   const result = await response.json().catch(() => ({}));
   if (response.status === 401) return;
-  if (!response.ok) throw new Error(result.error || "无法读取历史记录");
+  if (!response.ok) throw new Error(result.error || (language === "en" ? "Could not load records" : "无法读取历史记录"));
   records = Array.isArray(result.records) ? result.records : [];
   renderHistory(); populateForms();
 }
 
 async function runPhase({ phase, button, checkIn, images = [] }) {
   const original = button.innerHTML;
-  button.disabled = true; button.textContent = "AI 教练正在分析…"; setStatus("AI 分析中…", "loading");
+  button.disabled = true; button.textContent = language === "en" ? "AI coach is analyzing…" : "AI 教练正在分析…"; setStatus(language === "en" ? "AI analyzing…" : "AI 分析中…", "loading");
   try {
     const response = await requestCoach({ phase, ...checkIn }, images);
     const existing = currentRecord() || { date: $("log-date").value, height };
@@ -213,9 +280,9 @@ async function runPhase({ phase, button, checkIn, images = [] }) {
     if (phase === "midday") Object.assign(record, { midday: checkIn, stretch: response, plan: record.plan || { title: "未生成早间计划" } });
     if (phase === "evening") Object.assign(record, { evening: checkIn, eveningReview: response, plan: record.plan || { title: "未生成早间计划" } });
     await saveRecord(record);
-    renderCoachResponse(response, phase); setStatus("AI 教练 · 已连接");
+    renderCoachResponse(response, phase); setStatus(language === "en" ? "AI Coach · Connected" : "AI 教练 · 已连接");
   } catch (error) {
-    setStatus("AI 服务未连接", "error"); $("empty-plan").classList.add("hidden"); $("plan-content").classList.remove("hidden");
+    setStatus(language === "en" ? "AI service unavailable" : "AI 服务未连接", "error"); $("empty-plan").classList.add("hidden"); $("plan-content").classList.remove("hidden");
     $("plan-content").innerHTML = `<div class="plan-intro"><strong>这次没有保存</strong><br />${escapeHtml(error.message)}</div>`;
   } finally { button.disabled = false; button.innerHTML = original; }
 }
@@ -244,6 +311,7 @@ $("evening-form").addEventListener("submit", async (event) => {
 $("log-date").addEventListener("change", populateForms);
 $("clear-plan").addEventListener("click", showEmptyCoach);
 switchPhase(activePhase, false);
+applyLanguage();
 
 fetch("/api/me", { credentials: "same-origin" }).then((response) => response.json()).then(async ({ user }) => {
   if (user) { showApp(user); await loadRecords(); }
