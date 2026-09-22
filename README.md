@@ -1,55 +1,76 @@
 # 我的健身教练
 
-一个无需安装依赖的多模态健身教练 Agent。它按一天三个阶段工作：
+这是一个给自己用的健身记录小工具。
 
-- 早上记录体重、精力、酸痛和睡眠，由 AI 生成当天饮食与运动计划；
-- 训练后记录实际运动、时长和计划完成度，立即生成针对性的拉伸建议；
-- 晚上记录全天饮食、照片和排便情况，完成当日复盘；
-- 第二天早上由模型结合完整记录给前一天 0–100 分并解释依据；
-- 每天记录体重和测量时间，并将最近 14 天体重趋势交给教练判断；
-- 身高固定按 158 cm 作为个人档案使用，不需要每天重复填写；
-- 记录排便次数、状态和不适，帮助教练调整膳食纤维、饮水和食物结构；
-- 通过兼容 OpenAI Chat Completions 的视觉模型识别饮食照片，分析食物结构和粗略热量；
-- 将最近 14 天的训练、睡眠、精力和酸痛反馈一起交给模型，动态调整第二天训练负荷；
-- 持续积累结构化历史数据，为数据量足够后训练独立的个性化 ML 模型做好准备；
-- 支持邮箱+密码账号和 HttpOnly 会话 cookie；每个账号只能看到自己的打卡记录。默认使用本地 SQLite，设置 `DATABASE_URL` 后使用 Supabase PostgreSQL；
-- 查看最近 6 条打卡记录。
+我不太喜欢一天结束后一次性填一大张表，也不希望教练只看体重就下结论，所以把它拆成了三个比较自然的时间点：早上看看身体状态，练完记录实际做了什么，晚上再补上饮食和排便情况。第二天早上，它会结合昨天的完整记录做一次复盘。
 
-## 使用
+它不是要代替真正的教练，更像是一个每天记得来问几句、也记得昨天发生过什么的助手。
 
-1. 复制配置模板并填入 API Key：
+## 一天怎么用
+
+早上起床后，记录体重、睡眠、精力和肌肉酸痛。教练会根据当天可用时间，给出三餐和运动安排。
+
+训练结束后，把每项运动和实际时长记下来，再告诉它有没有按照早上的计划完成。它会根据真正练到的部位给出拉伸建议，而不是发一套固定动作。
+
+晚上记录全天吃过的东西、餐食照片和排便情况，完成当天复盘。第二天早上，教练会参考这些记录、计划完成度以及最近的趋势，为前一天给出 0–100 分和简单说明。
+
+目前这个分数由配置的大语言模型生成，并不是用个人数据训练出来的独立 ML 模型。项目会保存结构化历史数据，但在样本足够多、也有可靠评分标签之前，我不想把一个普通的 AI 评分包装成“个性化机器学习”。
+
+页面支持中文和英文。账号之间的数据互相隔离，本地运行时使用 SQLite，部署时可以连接 Supabase PostgreSQL。
+
+## 在本地运行
+
+项目没有前端构建步骤。需要 Python 3，以及一个兼容 OpenAI Chat Completions 接口的模型服务。
+
+先准备 `.env`：
 
 ```bash
 cp .env.example .env
 ```
 
-编辑 `.env`，至少填写 `OPENAI_API_KEY`。默认模型为 `qwen/qwen3.8-27b`，也可以通过 `OPENAI_MODEL` 和 `OPENAI_BASE_URL` 使用其他兼容服务。
-
-如果你的 Key 以 `gsk_` 开头，它是 Groq Key。本项目会在仍使用默认 OpenAI 地址时自动切换到 Groq，并使用支持图片的 Llama 4 Scout；也可以手动设置：
+至少填写 API Key：
 
 ```env
-OPENAI_BASE_URL=https://api.groq.com/openai/v1
-OPENAI_MODEL=qwen/qwen3.8-27b
+OPENAI_API_KEY=你的_API_Key
 ```
 
-2. 启动本地代理：
+如果使用 Groq，可以这样配置：
+
+```env
+OPENAI_API_KEY=gsk_...
+OPENAI_BASE_URL=https://api.groq.com/openai/v1
+OPENAI_MODEL=openai/gpt-oss-20b
+```
+
+`OPENAI_MODEL` 应填写你的账号实际可用的模型。只填写以 `gsk_` 开头的 Key 时，服务端也会自动把请求地址切换到 Groq。
+
+启动服务：
 
 ```bash
 python3 server.py
 ```
 
-3. 访问 <http://localhost:8000>。页面会按时间默认进入早上、训练后或晚上阶段，也可以随时手动切换。
+然后访问 <http://localhost:8000>。页面会按照本地时间默认打开早上、训练后或晚间阶段，但随时可以手动切换。
 
-## 部署到 Render + Supabase
+## 部署到 Render
 
-1. 在 Supabase 创建项目，复制连接池（Transaction pooler 也可以）连接字符串。
-2. 将项目推送到 GitHub，在 Render 创建 Web Service，运行时选择 Python；`render.yaml` 已提供构建和启动配置。
-3. 在 Render 环境变量中设置 `DATABASE_URL`、`OPENAI_API_KEY`，以及可选的 `OPENAI_BASE_URL`、`OPENAI_MODEL`。`COOKIE_SECURE=true` 适用于 Render HTTPS。
-4. 部署完成后打开 Render URL，注册账号即可。不要提交 `.env` 或把密钥写进代码；Supabase 数据库表会在服务首次启动时自动创建。
+仓库里已经有 `render.yaml`。常用的部署方式是 Render + Supabase：
 
-## 安全与边界
+1. 在 Supabase 创建项目，复制 PostgreSQL 连接字符串；
+2. 把仓库连接到 Render，创建 Python Web Service；
+3. 在 Render 设置 `DATABASE_URL`、`OPENAI_API_KEY`、`OPENAI_BASE_URL` 和 `OPENAI_MODEL`；
+4. 使用 HTTPS 时设置 `COOKIE_SECURE=true`；
+5. 部署完成后打开 Render 地址注册账号。
 
-- API Key 只在服务端 `server.py` 读取，浏览器不会看到 Key；密码使用标准库 PBKDF2-HMAC-SHA256 哈希，登录凭据通过 HttpOnly、SameSite cookie 传递；`.env` 已被 `.gitignore` 忽略。
-- 每次最多发送 4 张图片，整个请求限制为 18 MB；不要上传包含他人脸部或其他敏感信息的照片。
-- 模型只能进行辅助性建议，不能诊断疾病。出现疼痛、胸闷、眩晕等症状时停止训练并寻求专业帮助。
-- 如果没有配置 API Key，页面会明确提示配置错误，不会把本地规则结果伪装成 AI 结果。
+数据库表会在服务第一次启动时创建。不要把 `.env`、API Key 或数据库文件提交到 GitHub。
+
+## 数据和边界
+
+- API Key 只由服务端读取，不会发送到浏览器；
+- 密码使用 PBKDF2-HMAC-SHA256 保存，会话 Cookie 设置为 HttpOnly 和 SameSite；
+- 餐食照片会发送给配置的模型服务，每次最多 4 张，请不要上传他人的脸或敏感信息；
+- AI 服务有频率和 token 限制，繁忙时可能需要稍后重试；
+- 健身和饮食建议只适合作为日常参考，不能用于疾病诊断；
+- 出现疼痛、胸闷、眩晕或其他明显异常时，应停止训练并咨询专业人士。
+
+这个项目还在边用边改。比起生成一份看起来很专业的计划，我更在意它有没有认真使用当天真实记录，以及能不能坦白自己不知道什么。
