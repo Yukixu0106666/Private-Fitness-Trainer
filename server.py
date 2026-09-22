@@ -195,13 +195,14 @@ def call_model(payload):
 
 def prompt_for(body):
     check_in, history, images = body.get("checkIn", {}), body.get("history", [])[:14], body.get("images", [])
+    language = "English" if body.get("language") == "en" else "Chinese"
     content = [{"type": "text", "text": json.dumps({"今日反馈": check_in, "最近14天历史": history,
-        "任务": "结合饮食、排便、体重趋势和恢复情况生成明天安全具体的训练饮食建议。部分饮食记录不要推断全天营养，不要诊断疾病。"}, ensure_ascii=False)}]
+        "任务": f"结合饮食、排便、体重趋势和恢复情况生成明天安全具体的训练饮食建议。部分饮食记录不要推断全天营养，不要诊断疾病。Use {language} for every user-facing JSON value."}, ensure_ascii=False)}]
     for image in images[:4]:
         if isinstance(image, str) and image.startswith("data:image/"):
             content.append({"type": "image_url", "image_url": {"url": image, "detail": "low"}})
-    system = """你是一名谨慎的中文健身教练。输出严格 JSON，不要 Markdown，字段必须为：
-{"title":"不超过20字","summary":"2句以内","training":{"loadLabel":"不超过8字","items":["4-6条具体动作、组数、时间"]},"nutrition":{"analysis":"饮食结构分析","estimatedCalories":"可选范围或未知","nextDayTip":"明日饮食建议"},"recovery":"恢复和安全提醒","disclaimer":"固定提示"}"""
+    system = """你是一名谨慎的健身教练。Output all user-facing text in {language}. 输出严格 JSON，不要 Markdown，字段必须为：
+{"title":"不超过20字","summary":"2句以内","training":{"loadLabel":"不超过8字","items":["4-6条具体动作、组数、时间"]},"nutrition":{"analysis":"饮食结构分析","estimatedCalories":"可选范围或未知","nextDayTip":"明日饮食建议"},"recovery":"恢复和安全提醒","disclaimer":"固定提示"}""".replace("{language}", language)
     return [{"role": "system", "content": system}, {"role": "user", "content": content}]
 
 
