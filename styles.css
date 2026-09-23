@@ -78,6 +78,11 @@ h3 { font-size: 15px; line-height: 1.35; }
 .field { display: block; margin: 0 0 19px; }
 .field > span, .radio-field legend, .wellness-heading span { display: block; font-size: 14px; font-weight: 700; line-height: 1.35; margin-bottom: 8px; }
 .field-help { color: var(--muted); display: block; font-size: 11px; line-height: 1.5; margin: -9px 0 18px; }
+.memory-settings { background: #f8fbf8; border: 1px solid var(--line); border-radius: var(--radius-md); margin: -5px 0 19px; padding: 11px 13px 1px; }
+.memory-settings summary { color: var(--green-dark); cursor: pointer; font-size: 13px; font-weight: 700; margin-bottom: 10px; }
+.memory-settings summary small { color: var(--muted); font-size: 10px; font-weight: 400; margin-left: 5px; }
+.memory-settings:not([open]) summary { margin-bottom: 10px; }
+.memory-settings .field { margin-bottom: 12px; }
 .wellness-heading { border-top: 1px solid var(--line); display: flex; gap: 9px; margin: 24px 0 15px; padding-top: 22px; }
 .wellness-heading span { margin-bottom: 0; }
 .wellness-heading small { color: var(--muted); font-size: 11px; }
@@ -169,6 +174,7 @@ input[type="file"] { padding: 8px; }
 .empty-state p { color: var(--muted); font-size: 14px; line-height: 1.7; margin: 0; max-width: 270px; }
 .hidden { display: none !important; }
 .plan-content { min-height: 470px; }
+.plan-provenance { background: #f7faf7; border: 1px solid var(--line); border-radius: 10px; color: var(--muted); font-size: 11px; line-height: 1.55; margin-top: 12px; padding: 10px 12px; }
 .score-card { align-items: center; background: #17221c; border-radius: 14px; color: #fff; display: flex; gap: 16px; margin-bottom: 12px; padding: 16px; }
 .score-number { color: #bce2c8; flex: 0 0 auto; font-size: 32px; font-weight: 800; letter-spacing: -.05em; line-height: 1; }
 .score-number small { font-size: 11px; letter-spacing: 0; margin-left: 2px; }

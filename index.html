@@ -47,6 +47,12 @@
           <form id="morning-form" class="phase-form">
             <div class="phase-heading"><div><p class="section-kicker">MORNING CHECK-IN</p><h3>早上好，先看看今天的身体状态</h3></div><span id="morning-saved" class="saved-mark"></span></div>
             <label class="field"><span>你的目标</span><select id="goal"><option value="fat-loss">减脂塑形</option><option value="muscle">增肌增力</option><option value="fitness">提升体能</option><option value="health">保持健康</option></select></label>
+            <details class="memory-settings">
+              <summary>长期记忆设置 <small>由你确认后保存</small></summary>
+              <label class="field"><span>可用器械 <em>可选</em></span><input id="profile-equipment" type="text" placeholder="例如：瑜伽垫、哑铃、弹力带" /></label>
+              <label class="field"><span>饮食偏好或限制 <em>可选</em></span><input id="profile-diet" type="text" placeholder="例如：不吃牛肉、乳糖不耐" /></label>
+              <label class="field"><span>长期身体限制 <em>可选</em></span><input id="profile-constraints" type="text" placeholder="只填写希望教练长期记住的信息" /></label>
+            </details>
             <div class="metrics profile-metrics">
             <label class="field">
               <span>晨起体重（kg）</span>
@@ -106,6 +112,7 @@
             <p>我会陪你完成早上计划、训练后拉伸和晚上复盘，并在明早为今天评分。</p>
           </div>
           <div id="plan-content" class="plan-content hidden"></div>
+          <div id="plan-provenance" class="plan-provenance hidden"></div>
         </aside>
       </section>
 

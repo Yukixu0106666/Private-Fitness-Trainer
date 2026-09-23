@@ -8,6 +8,7 @@ const isoDate = (date) => {
 
 let photos = [];
 let records = [];
+let profile = {};
 let registerMode = false;
 let activePhase = today.getHours() < 11 ? "morning" : today.getHours() < 18 ? "midday" : "evening";
 let language = localStorage.getItem("fitness-coach-language") || "zh";
@@ -37,7 +38,8 @@ const enText = {
   "最近记录": "Recent records", "0 条记录": "0 records", "完成第一次打卡后，这里会显示你的记录。": "Your records will appear after your first check-in.",
   "健康建议不能替代医生或持证教练的诊断。出现疼痛、胸闷、眩晕等症状时请停止训练并寻求专业帮助。": "Health guidance does not replace a doctor or certified trainer. Stop and seek help for pain, chest tightness, or dizziness.",
   "很好": "Very good", "不错": "Good", "一般": "Average", "较低": "Low", "很差": "Very low", "几乎没有": "Almost none", "轻微": "Slight", "中等": "Moderate", "明显": "Noticeable", "很严重": "Severe",
-  "很轻松": "Very easy", "适中": "Moderate", "较累": "Hard", "非常累": "Very hard", "分钟": "min", "已保存": "Saved"
+  "很轻松": "Very easy", "适中": "Moderate", "较累": "Hard", "非常累": "Very hard", "分钟": "min", "已保存": "Saved",
+  "长期记忆设置": "Long-term memory", "由你确认后保存": "saved only after your confirmation", "可用器械": "Available equipment", "饮食偏好或限制": "Dietary preferences or restrictions", "长期身体限制": "Long-term physical constraints", "只填写希望教练长期记住的信息": "Only enter information you want the coach to remember"
 };
 const originalText = new WeakMap();
 const originalPlaceholder = new WeakMap();
@@ -60,7 +62,7 @@ function applyLanguage() {
     element.placeholder = language === "en" ? ({
       "例如：55.05": "e.g. 55.05", "例如：右膝不舒服，今天只能在家练": "e.g. My right knee hurts; I can only train at home",
       "例如：腿比较紧，左肩活动时不舒服": "e.g. Tight legs and left shoulder discomfort", "按早餐、午餐、晚餐和加餐记录，尽量写上大致分量": "List breakfast, lunch, dinner, snacks, and approximate portions",
-      "例如：晚饭后很撑、今天喝水比较少": "e.g. Felt too full after dinner and drank little water"
+      "例如：晚饭后很撑、今天喝水比较少": "e.g. Felt too full after dinner and drank little water", "例如：瑜伽垫、哑铃、弹力带": "e.g. yoga mat, dumbbells, resistance bands", "例如：不吃牛肉、乳糖不耐": "e.g. no beef, lactose intolerant", "只填写希望教练长期记住的信息": "Only enter information you want the coach to remember"
     }[original] || original) : original;
   });
   $("language-toggle").textContent = language === "en" ? "中文" : "English";
@@ -136,6 +138,7 @@ $("auth-form").addEventListener("submit", async (event) => {
 $("logout-button").addEventListener("click", async () => {
   await authRequest("/api/logout", {});
   records = [];
+  profile = {};
   renderHistory();
   showApp(null);
 });
@@ -195,11 +198,35 @@ function renderCoachResponse(response, phase) {
   applyLanguage();
 }
 
+function renderProvenance(provenance) {
+  const element = $("plan-provenance");
+  if (!provenance || !Array.isArray(provenance.sources)) {
+    element.classList.add("hidden");
+    element.innerHTML = "";
+    return;
+  }
+  const sourceLabels = provenance.sources.map((source) => {
+    if (source.type === "confirmed_profile") return language === "en" ? "confirmed profile" : "已确认画像";
+    if (source.type === "daily_record") return `${language === "en" ? "record" : "记录"} ${source.date}`;
+    if (source.type === "coach_output") return `${language === "en" ? "prior AI plan" : "既有 AI 计划"} ${source.date}`;
+    if (source.type === "server_derived_stats") return `${language === "en" ? "server-calculated trend" : "服务端计算趋势"} ${source.period?.from || ""}–${source.period?.to || ""}`;
+    if (source.type === "tool_daily_record") return `${language === "en" ? "extra record" : "补充记录"} ${source.date}`;
+    if (source.type === "tool_recent_records") return language === "en" ? "extra recent records" : "补充近期记录";
+    if (source.type === "tool_derived_weight_trend") return language === "en" ? "extra weight trend" : "补充体重趋势";
+    return source.type;
+  });
+  const missing = Array.isArray(provenance.missingData) && provenance.missingData.length
+    ? ` · ${language === "en" ? "Missing" : "缺少"}: ${provenance.missingData.map(escapeHtml).join(", ")}` : "";
+  element.innerHTML = `<strong>${language === "en" ? "Evidence" : "依据来源"}</strong>: ${sourceLabels.map(escapeHtml).join(" · ") || (language === "en" ? "current input only" : "仅本次输入")}${missing}`;
+  element.classList.remove("hidden");
+}
+
 function showEmptyCoach() {
   $("empty-plan").classList.remove("hidden");
   $("plan-content").classList.add("hidden");
   $("plan-content").innerHTML = "";
   $("plan-title").textContent = activePhase === "morning" ? "今日计划" : activePhase === "midday" ? "拉伸建议" : "今日复盘";
+  renderProvenance(null);
   applyLanguage();
 }
 
@@ -207,6 +234,7 @@ function renderSavedResponse() {
   const record = currentRecord();
   const response = activePhase === "morning" ? record?.plan : activePhase === "midday" ? record?.stretch : record?.eveningReview;
   renderCoachResponse(response, activePhase);
+  renderProvenance(record?.coachMetadata?.[activePhase]);
 }
 
 function populateForms() {
@@ -214,7 +242,8 @@ function populateForms() {
   const morning = record.morning || record;
   const midday = record.midday || record;
   const evening = record.evening || record;
-  setValue("goal", record.goal, "fat-loss"); setValue("weight", morning.weight); setValue("sleep", morning.sleep, "7");
+  setValue("goal", record.goal, profile.goal || "fat-loss"); setValue("weight", morning.weight); setValue("sleep", morning.sleep, "7");
+  setValue("profile-equipment", profile.equipment); setValue("profile-diet", profile.dietaryPreferences); setValue("profile-constraints", profile.constraints);
   setValue("energy", morning.energy, "3"); setValue("soreness", morning.soreness, "2"); setValue("available-time", morning.availableTime, "45"); setValue("morning-notes", morning.notes);
   $("exercise-list").innerHTML = "";
   const exercises = Array.isArray(midday.exercises) && midday.exercises.length ? midday.exercises : midday.workout ? [{ name: midday.workout, duration: midday.duration || "" }] : [{ name: "", duration: "" }];
@@ -246,16 +275,17 @@ function setStatus(text, state = "") {
 }
 
 async function requestCoach(checkIn, imageData = []) {
-  const response = await fetch("/api/coach", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ checkIn, history: records.slice(0, 14), images: imageData, language }) });
+  const response = await fetch("/api/coach", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ checkIn, images: imageData, language }) });
   const result = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(result.error || (language === "en" ? "AI coach is temporarily unavailable" : "AI 教练暂时无法响应"));
-  return result.plan;
+  return result;
 }
 
 async function saveRecord(record) {
   const response = await fetch("/api/records", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(record) });
   const result = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(result.error || (language === "en" ? "Could not save record" : "无法保存记录"));
+  profile = result.profile?.confirmed || profile;
   records = [record, ...records.filter((item) => item.date !== record.date)].sort((a, b) => b.date.localeCompare(a.date));
   renderHistory(); populateForms();
 }
@@ -266,45 +296,61 @@ async function loadRecords() {
   if (response.status === 401) return;
   if (!response.ok) throw new Error(result.error || (language === "en" ? "Could not load records" : "无法读取历史记录"));
   records = Array.isArray(result.records) ? result.records : [];
+  profile = result.profile?.confirmed || {};
   renderHistory(); populateForms();
 }
 
 async function runPhase({ phase, button, checkIn, images = [] }) {
   const original = button.innerHTML;
-  button.disabled = true; button.textContent = language === "en" ? "AI coach is analyzing…" : "AI 教练正在分析…"; setStatus(language === "en" ? "AI analyzing…" : "AI 分析中…", "loading");
+  const factualCheckIn = { ...checkIn };
+  const profileUpdate = factualCheckIn.profileUpdate;
+  delete factualCheckIn.profileUpdate;
+  const existing = currentRecord() || { date: $("log-date").value, height };
+  const record = { ...existing, date: $("log-date").value, height, goal: $("goal").value };
+  record._invalidatePhase = phase;
+  if (phase === "morning") { Object.assign(record, { morning: factualCheckIn, _profile: profileUpdate }); delete record.plan; }
+  if (phase === "midday") { Object.assign(record, { midday: factualCheckIn }); delete record.stretch; }
+  if (phase === "evening") { Object.assign(record, { evening: factualCheckIn }); delete record.eveningReview; }
+  let checkInSaved = false;
+  button.disabled = true; button.textContent = language === "en" ? "AI coach is analyzing…" : "AI 教练正在分析…"; setStatus(language === "en" ? "Saving check-in…" : "正在保存打卡…", "loading");
   try {
-    const response = await requestCoach({ phase, ...checkIn }, images);
-    const existing = currentRecord() || { date: $("log-date").value, height };
-    const record = { ...existing, date: $("log-date").value, height, goal: $("goal").value };
-    if (phase === "morning") Object.assign(record, { morning: checkIn, plan: response });
-    if (phase === "midday") Object.assign(record, { midday: checkIn, stretch: response, plan: record.plan || { title: "未生成早间计划" } });
-    if (phase === "evening") Object.assign(record, { evening: checkIn, eveningReview: response, plan: record.plan || { title: "未生成早间计划" } });
     await saveRecord(record);
-    renderCoachResponse(response, phase); setStatus(language === "en" ? "AI Coach · Connected" : "AI 教练 · 已连接");
+    checkInSaved = true;
+    delete record._profile;
+    delete record._invalidatePhase;
+    setStatus(language === "en" ? "Check-in saved · AI analyzing…" : "打卡已保存 · AI 分析中…", "loading");
+    const result = await requestCoach({ phase, ...factualCheckIn }, images);
+    const response = result.plan;
+    if (phase === "morning") Object.assign(record, { plan: response });
+    if (phase === "midday") Object.assign(record, { stretch: response });
+    if (phase === "evening") Object.assign(record, { eveningReview: response });
+    await loadRecords();
+    const usedTools = Array.isArray(result.toolsUsed) && result.toolsUsed.length;
+    const forcedFinish = result.agent?.forcedFinish;
+    renderCoachResponse(response, phase); renderProvenance(result.provenance); setStatus(language === "en" ? `AI Coach · ${forcedFinish ? "Limited-data fallback" : usedTools ? "Extra history read" : "Fixed memory loaded"}` : `AI 教练 · ${forcedFinish ? "已降级生成" : usedTools ? "已补充读取历史" : "固定记忆已加载"}`);
   } catch (error) {
     setStatus(language === "en" ? "AI service unavailable" : "AI 服务未连接", "error"); $("empty-plan").classList.add("hidden"); $("plan-content").classList.remove("hidden");
-    $("plan-content").innerHTML = `<div class="plan-intro"><strong>这次没有保存</strong><br />${escapeHtml(error.message)}</div>`;
+    const title = checkInSaved ? (language === "en" ? "Check-in saved, but AI guidance failed" : "打卡已保存，但 AI 建议生成失败") : (language === "en" ? "This check-in was not saved" : "这次没有保存");
+    $("plan-content").innerHTML = `<div class="plan-intro"><strong>${escapeHtml(title)}</strong><br />${escapeHtml(error.message)}</div>`;
   } finally { button.disabled = false; button.innerHTML = original; }
 }
 
 $("morning-form").addEventListener("submit", (event) => {
   event.preventDefault();
-  runPhase({ phase: "morning", button: $("morning-submit"), checkIn: { date: $("log-date").value, goal: $("goal").value, height, weight: $("weight").value, sleep: $("sleep").value, energy: $("energy").value, soreness: $("soreness").value, availableTime: $("available-time").value, notes: $("morning-notes").value.trim(), previousDay: records.find((record) => record.date === priorDate($("log-date").value)) || null } });
+  runPhase({ phase: "morning", button: $("morning-submit"), checkIn: { date: $("log-date").value, goal: $("goal").value, height, weight: $("weight").value, sleep: $("sleep").value, energy: $("energy").value, soreness: $("soreness").value, availableTime: $("available-time").value, notes: $("morning-notes").value.trim(), profileUpdate: { equipment: $("profile-equipment").value.trim(), dietaryPreferences: $("profile-diet").value.trim(), constraints: $("profile-constraints").value.trim() } } });
 });
 
 $("midday-form").addEventListener("submit", (event) => {
   event.preventDefault();
-  const existing = currentRecord();
   const exercises = Array.from(document.querySelectorAll(".exercise-row")).map((row) => ({ name: row.querySelector(".exercise-name").value.trim(), duration: row.querySelector(".exercise-duration").value })).filter((exercise) => exercise.name || exercise.duration);
-  runPhase({ phase: "midday", button: $("midday-submit"), checkIn: { date: $("log-date").value, exercises, totalDuration: exercises.reduce((sum, exercise) => sum + (Number(exercise.duration) || 0), 0), planAdherence: $("plan-adherence").value, effort: $("workout-effort").value, notes: $("workout-notes").value.trim(), todayPlan: existing?.plan || null, morningState: existing?.morning || null } });
+  runPhase({ phase: "midday", button: $("midday-submit"), checkIn: { date: $("log-date").value, exercises, totalDuration: exercises.reduce((sum, exercise) => sum + (Number(exercise.duration) || 0), 0), planAdherence: $("plan-adherence").value, effort: $("workout-effort").value, notes: $("workout-notes").value.trim() } });
 });
 
 $("evening-form").addEventListener("submit", async (event) => {
   event.preventDefault();
-  const existing = currentRecord();
   try {
     const imageData = await Promise.all(photos.map(fileToDataUrl));
-    runPhase({ phase: "evening", button: $("evening-submit"), images: imageData, checkIn: { date: $("log-date").value, food: $("food").value.trim(), bowelFrequency: $("bowel-frequency").value, bowelForm: $("bowel-form").value, bowelSymptoms: $("bowel-symptoms").value, notes: $("evening-notes").value.trim(), morningState: existing?.morning || null, workoutResult: existing?.midday || null, todayPlan: existing?.plan || null } });
+    runPhase({ phase: "evening", button: $("evening-submit"), images: imageData, checkIn: { date: $("log-date").value, food: $("food").value.trim(), bowelFrequency: $("bowel-frequency").value, bowelForm: $("bowel-form").value, bowelSymptoms: $("bowel-symptoms").value, notes: $("evening-notes").value.trim() } });
   } catch (error) { setStatus(error.message, "error"); }
 });
 
