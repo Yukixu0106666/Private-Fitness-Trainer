@@ -92,6 +92,29 @@ class AgentLoopTests(unittest.TestCase):
         self.assertFalse(model_calls[-1]["tools_enabled"])
 
 
+class ModelRequestTests(unittest.TestCase):
+    def request_body(self, tools_enabled):
+        with patch.object(server, "urlopen") as urlopen:
+            response = urlopen.return_value.__enter__.return_value
+            response.read.return_value = b'{"choices":[{"message":{"content":"{}"}}]}'
+            server.request_model(
+                "https://example.com/v1", "test-key", "test-model",
+                [{"role": "system", "content": "Return JSON"}],
+                tools_enabled=tools_enabled,
+            )
+            return json.loads(urlopen.call_args.args[0].data)
+
+    def test_tool_request_does_not_combine_tools_with_response_format(self):
+        body = self.request_body(tools_enabled=True)
+        self.assertIn("tools", body)
+        self.assertNotIn("response_format", body)
+
+    def test_tool_free_request_keeps_json_mode(self):
+        body = self.request_body(tools_enabled=False)
+        self.assertNotIn("tools", body)
+        self.assertEqual(body["response_format"], {"type": "json_object"})
+
+
 class RecordPersistenceTests(unittest.TestCase):
     def create_user(self):
         with server.db() as (connection, placeholder):

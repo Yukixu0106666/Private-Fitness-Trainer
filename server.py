@@ -565,7 +565,6 @@ def request_model(base_url, api_key, model, messages, tools_enabled=True, requir
     request_body = {
         "model": model,
         "temperature": 0.3,
-        "response_format": {"type": "json_object"},
         "messages": messages,
     }
     if tools_enabled:
@@ -574,6 +573,8 @@ def request_model(base_url, api_key, model, messages, tools_enabled=True, requir
             "tool_choice": "required" if require_tool else "auto",
             "parallel_tool_calls": False,
         })
+    else:
+        request_body["response_format"] = {"type": "json_object"}
     request = Request(f"{base_url}/chat/completions", data=json.dumps(request_body).encode(),
         headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json", "User-Agent": "fitness-coach/1.0"}, method="POST")
     try:
