@@ -24,7 +24,7 @@ const enText = {
   "睡眠（小时）": "Sleep (hours)", "建议晨起、如厕、早餐前称重，趋势更有参考价值。": "For a useful trend, weigh after using the bathroom and before breakfast.",
   "精力": "Energy", "肌肉酸痛": "Muscle soreness", "可运动时间": "Time available", "身体不适或特别安排": "Pain or special considerations",
   "可选": "Optional", "生成今天的饮食与运动计划": "Create today's meal and workout plan", "练完了，记录实际完成情况": "Workout complete — log what you actually did",
-  "做了哪些运动，各做了多久？": "Which exercises did you do, and for how long?", "＋ 添加一项运动": "+ Add exercise",
+  "做了哪些运动，各做了多少？": "Which exercises did you do, and how much?", "＋ 添加一项运动": "+ Add exercise",
   "是否按早上建议完成": "Followed the morning plan?", "全部完成": "Completed all", "完成一部分": "Completed part", "做了其他运动": "Did a different workout",
   "今天没做": "No workout today", "实际强度": "Perceived effort", "训练后感觉": "How did you feel afterward?", "生成训练后拉伸建议": "Create post-workout stretches",
   "晚上好，完成今天的饮食与身体复盘": "Good evening — finish today's food and body review", "今天一整天吃了什么？": "What did you eat today?",
@@ -38,7 +38,7 @@ const enText = {
   "最近记录": "Recent records", "0 条记录": "0 records", "完成第一次打卡后，这里会显示你的记录。": "Your records will appear after your first check-in.",
   "健康建议不能替代医生或持证教练的诊断。出现疼痛、胸闷、眩晕等症状时请停止训练并寻求专业帮助。": "Health guidance does not replace a doctor or certified trainer. Stop and seek help for pain, chest tightness, or dizziness.",
   "很好": "Very good", "不错": "Good", "一般": "Average", "较低": "Low", "很差": "Very low", "几乎没有": "Almost none", "轻微": "Slight", "中等": "Moderate", "明显": "Noticeable", "很严重": "Severe",
-  "很轻松": "Very easy", "适中": "Moderate", "较累": "Hard", "非常累": "Very hard", "分钟": "min", "已保存": "Saved",
+  "很轻松": "Very easy", "适中": "Moderate", "较累": "Hard", "非常累": "Very hard", "分钟": "min", "个": "reps", "已保存": "Saved",
   "长期记忆设置": "Long-term memory", "由你确认后保存": "saved only after your confirmation", "可用器械": "Available equipment", "饮食偏好或限制": "Dietary preferences or restrictions", "长期身体限制": "Long-term physical constraints", "只填写希望教练长期记住的信息": "Only enter information you want the coach to remember"
 };
 const originalText = new WeakMap();
@@ -60,7 +60,7 @@ function applyLanguage() {
     if (!originalPlaceholder.has(element)) originalPlaceholder.set(element, element.placeholder);
     const original = originalPlaceholder.get(element);
     element.placeholder = language === "en" ? ({
-      "例如：55.05": "e.g. 55.05", "例如：右膝不舒服，今天只能在家练": "e.g. My right knee hurts; I can only train at home",
+      "例如：55.05": "e.g. 55.05", "运动名称，如快走": "Exercise, e.g. brisk walking", "例如：右膝不舒服，今天只能在家练": "e.g. My right knee hurts; I can only train at home",
       "例如：腿比较紧，左肩活动时不舒服": "e.g. Tight legs and left shoulder discomfort", "按早餐、午餐、晚餐和加餐记录，尽量写上大致分量": "List breakfast, lunch, dinner, snacks, and approximate portions",
       "例如：晚饭后很撑、今天喝水比较少": "e.g. Felt too full after dinner and drank little water", "例如：瑜伽垫、哑铃、弹力带": "e.g. yoga mat, dumbbells, resistance bands", "例如：不吃牛肉、乳糖不耐": "e.g. no beef, lactose intolerant", "只填写希望教练长期记住的信息": "Only enter information you want the coach to remember"
     }[original] || original) : original;
@@ -87,18 +87,24 @@ function currentRecord() {
 
 function setValue(id, value, fallback = "") { $(id).value = value ?? fallback; }
 
-function addExerciseRow(name = "", duration = "") {
+function addExerciseRow(name = "", amount = "", unit = "minutes") {
   const row = document.createElement("div");
   row.className = "exercise-row";
-  row.innerHTML = `<input class="exercise-name" type="text" placeholder="运动名称，如快走" value="${escapeHtml(name)}" /><div class="duration-input"><input class="exercise-duration" type="number" min="0" max="600" step="1" placeholder="30" value="${escapeHtml(duration)}" /><span>分钟</span></div><button class="remove-exercise" type="button" aria-label="删除这项运动">×</button>`;
+  row.innerHTML = `<input class="exercise-name" type="text" placeholder="运动名称，如快走" value="${escapeHtml(name)}" /><div class="exercise-measure"><input class="exercise-amount" type="number" min="0" max="10000" step="1" placeholder="30" value="${escapeHtml(amount)}" /><select class="exercise-unit" aria-label="单位"><option value="minutes"${unit === "minutes" ? " selected" : ""}>分钟</option><option value="reps"${unit === "reps" ? " selected" : ""}>个</option></select></div><button class="remove-exercise" type="button" aria-label="删除这项运动">×</button>`;
   row.querySelector(".remove-exercise").addEventListener("click", () => {
     row.remove();
-    if (!$("exercise-list").children.length) addExerciseRow();
+    if (!$("exercise-list").children.length) {
+      addExerciseRow();
+      applyLanguage();
+    }
   });
   $("exercise-list").appendChild(row);
 }
 
-$("add-exercise").addEventListener("click", () => addExerciseRow());
+$("add-exercise").addEventListener("click", () => {
+  addExerciseRow();
+  applyLanguage();
+});
 
 function showApp(user) {
   $("auth-card").classList.toggle("hidden", !!user);
@@ -247,7 +253,7 @@ function populateForms() {
   setValue("energy", morning.energy, "3"); setValue("soreness", morning.soreness, "2"); setValue("available-time", morning.availableTime, "45"); setValue("morning-notes", morning.notes);
   $("exercise-list").innerHTML = "";
   const exercises = Array.isArray(midday.exercises) && midday.exercises.length ? midday.exercises : midday.workout ? [{ name: midday.workout, duration: midday.duration || "" }] : [{ name: "", duration: "" }];
-  exercises.forEach((exercise) => addExerciseRow(exercise.name, exercise.duration));
+  exercises.forEach((exercise) => addExerciseRow(exercise.name, exercise.amount ?? exercise.duration, exercise.unit || "minutes"));
   setValue("plan-adherence", midday.planAdherence, "partial"); setValue("workout-effort", midday.effort, "3"); setValue("workout-notes", midday.notes);
   setValue("food", evening.food); setValue("bowel-frequency", evening.bowelFrequency, "1"); setValue("bowel-form", evening.bowelForm, "normal"); setValue("bowel-symptoms", evening.bowelSymptoms, "none"); setValue("evening-notes", evening.notes);
   $("morning-saved").textContent = record.morning || record.weight ? "✓ 已保存" : "";
@@ -342,8 +348,9 @@ $("morning-form").addEventListener("submit", (event) => {
 
 $("midday-form").addEventListener("submit", (event) => {
   event.preventDefault();
-  const exercises = Array.from(document.querySelectorAll(".exercise-row")).map((row) => ({ name: row.querySelector(".exercise-name").value.trim(), duration: row.querySelector(".exercise-duration").value })).filter((exercise) => exercise.name || exercise.duration);
-  runPhase({ phase: "midday", button: $("midday-submit"), checkIn: { date: $("log-date").value, exercises, totalDuration: exercises.reduce((sum, exercise) => sum + (Number(exercise.duration) || 0), 0), planAdherence: $("plan-adherence").value, effort: $("workout-effort").value, notes: $("workout-notes").value.trim() } });
+  const exercises = Array.from(document.querySelectorAll(".exercise-row")).map((row) => ({ name: row.querySelector(".exercise-name").value.trim(), amount: row.querySelector(".exercise-amount").value, unit: row.querySelector(".exercise-unit").value })).filter((exercise) => exercise.name || exercise.amount);
+  const totalDuration = exercises.filter((exercise) => exercise.unit === "minutes").reduce((sum, exercise) => sum + (Number(exercise.amount) || 0), 0);
+  runPhase({ phase: "midday", button: $("midday-submit"), checkIn: { date: $("log-date").value, exercises, totalDuration, planAdherence: $("plan-adherence").value, effort: $("workout-effort").value, notes: $("workout-notes").value.trim() } });
 });
 
 $("evening-form").addEventListener("submit", async (event) => {

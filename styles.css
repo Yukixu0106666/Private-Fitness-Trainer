@@ -124,10 +124,10 @@ input[type="file"] { padding: 8px; }
 .saved-mark { color: var(--green); font-size: 11px; font-weight: 700; white-space: nowrap; }
 .field-label { display: block; font-size: 14px; font-weight: 700; line-height: 1.35; margin-bottom: 8px; }
 .exercise-list { display: grid; gap: 8px; }
-.exercise-row { display: grid; gap: 8px; grid-template-columns: minmax(0, 1fr) 118px 30px; }
-.duration-input { position: relative; }
-.duration-input input { padding-right: 41px; }
-.duration-input span { color: var(--muted); font-size: 11px; pointer-events: none; position: absolute; right: 10px; top: 13px; }
+.exercise-row { display: grid; gap: 8px; grid-template-columns: minmax(0, 1fr) 170px 30px; }
+.exercise-measure { display: grid; grid-template-columns: minmax(0, 1fr) 72px; }
+.exercise-measure input { border-radius: var(--radius-md) 0 0 var(--radius-md); position: relative; z-index: 1; }
+.exercise-measure select { border-radius: 0 var(--radius-md) var(--radius-md) 0; margin-left: -1px; padding-left: 9px; padding-right: 7px; }
 .remove-exercise { background: transparent; border: 0; color: #9aaaa0; cursor: pointer; font-size: 21px; padding: 5px; }
 .remove-exercise:hover { color: #a64d3d; }
 .add-row-button { background: transparent; border: 0; color: var(--green); cursor: pointer; font-size: 12px; font-weight: 700; margin-top: 8px; padding: 3px 0; }
@@ -222,7 +222,8 @@ footer { margin-top: 24px; text-align: center; }
   .profile-metrics { grid-template-columns: 1fr 1fr; }
   .phase-tabs { gap: 5px; }
   .phase-tab { padding: 9px 7px; }
-  .exercise-row { grid-template-columns: minmax(0, 1fr) 105px 25px; }
+  .exercise-row { grid-template-columns: minmax(0, 1fr) 145px 25px; }
+  .exercise-measure { grid-template-columns: minmax(0, 1fr) 65px; }
   .radio-field label { display: flex; margin-right: 0; }
   .history-item { align-items: flex-start; display: block; }
   .history-date { margin-bottom: 3px; }
