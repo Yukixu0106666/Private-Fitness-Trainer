@@ -778,6 +778,13 @@ class Handler(SimpleHTTPRequestHandler):
     def request_path(self):
         return self.path.split("?", 1)[0]
 
+    def end_headers(self):
+        if self.request_path() in ("/", "/index.html", "/app.js", "/styles.css"):
+            self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+            self.send_header("Pragma", "no-cache")
+            self.send_header("Expires", "0")
+        super().end_headers()
+
     def token(self):
         cookies = SimpleCookie(self.headers.get("Cookie", ""))
         return cookies["session"].value if "session" in cookies else None
