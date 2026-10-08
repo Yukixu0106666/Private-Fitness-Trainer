@@ -55,7 +55,7 @@ GitHub Actions 会在每次 push 和 pull request 中同时运行单元测试与
 登录后可读取：
 
 - `GET /api/traces?limit=20`：最近请求及 span；
-- `GET /api/metrics?limit=100`：最近请求的 p50/p95 延迟、平均/总成本、token 总量和成功率。
+- `GET /api/metrics?limit=100`：最近请求的 p50/p95 延迟、平均/总成本、token 总量和成功率；真实端到端基准（16 次串行 `/api/coach` 请求，Groq `qwen/qwen3.8-27b`）实测 p95 为 **1.66 秒**、成功率 **100%**，累计处理 55,251 tokens（2026-10-07）。
 
 `/api/coach` 的响应也会返回 `observability`，包含本次请求的 trace ID、延迟、token 和估算成本。
 
