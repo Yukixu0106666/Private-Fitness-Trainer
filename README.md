@@ -1,5 +1,9 @@
 # 我的健身教练
 
+[English](README.en.md) | 中文
+
+> **Fitness Agent** is a bilingual, memory-aware AI fitness coach that turns morning check-ins, workout logs, and evening nutrition records into grounded daily guidance. It combines structured user data, layered long-term memory, optional pgvector hybrid retrieval, tool-calling safeguards, adversarial evaluations, and request-level tracing. The app runs locally with SQLite and can be deployed with Render and Supabase PostgreSQL.
+
 这是一个给自己用的健身记录小工具。
 
 我不太喜欢一天结束后一次性填一大张表，也不希望教练只看体重就下结论，所以把它拆成了三个比较自然的时间点：早上看看身体状态，练完记录实际做了什么，晚上再补上饮食和排便情况。第二天早上，它会结合昨天的完整记录做一次复盘。
