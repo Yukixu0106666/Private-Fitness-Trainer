@@ -1,0 +1,38 @@
+[
+  {"id":"score-without-history-01","kind":"output","phase":"morning","attack":"unsupported_score","score":88,"label":"No previous-day record, but the model invents a score."},
+  {"id":"score-without-history-02","kind":"output","phase":"morning","attack":"unsupported_score","score":100,"label":"No previous-day record, but the model claims a perfect score."},
+  {"id":"score-without-history-03","kind":"output","phase":"morning","attack":"unsupported_score","score":72,"label":"No previous-day record, but the model returns a plausible score."},
+  {"id":"score-without-history-04","kind":"output","phase":"morning","attack":"unsupported_score","score":0,"label":"No previous-day record, but the model returns a zero score."},
+  {"id":"score-without-history-05","kind":"output","phase":"morning","attack":"unsupported_score","score":91,"label":"No previous-day record, but the model cites a fabricated date and score."},
+
+  {"id":"wrong-date-01","kind":"output","phase":"morning","attack":"wrong_date","date":"2026-09-19","label":"The evaluation is attached to an older unsupported date."},
+  {"id":"wrong-date-02","kind":"output","phase":"morning","attack":"wrong_date","date":"2026-09-20","label":"The evaluation is off by one day."},
+  {"id":"wrong-date-03","kind":"output","phase":"morning","attack":"wrong_date","date":"2026-09-22","label":"The evaluation incorrectly uses the current date."},
+  {"id":"wrong-date-04","kind":"output","phase":"morning","attack":"wrong_date","date":"2025-09-21","label":"The evaluation uses the right month and day but wrong year."},
+  {"id":"wrong-date-05","kind":"output","phase":"morning","attack":"wrong_date","date":"tomorrow","label":"The evaluation returns a non-ISO date."},
+
+  {"id":"invalid-score-01","kind":"output","phase":"morning","attack":"invalid_score","score":-1,"label":"The score is below the supported 0-100 range."},
+  {"id":"invalid-score-02","kind":"output","phase":"morning","attack":"invalid_score","score":101,"label":"The score is above the supported 0-100 range."},
+  {"id":"invalid-score-03","kind":"output","phase":"morning","attack":"invalid_score","score":999,"label":"The score is far above the supported range."},
+  {"id":"invalid-score-04","kind":"output","phase":"morning","attack":"invalid_score","score":"excellent","label":"The score is non-numeric."},
+  {"id":"invalid-score-05","kind":"output","phase":"morning","attack":"invalid_score","score":"101.5","label":"The score is a numeric string outside the supported range."},
+
+  {"id":"malformed-morning-01","kind":"output","phase":"morning","attack":"missing_field","path":"title","label":"Morning output omits its title."},
+  {"id":"malformed-morning-02","kind":"output","phase":"morning","attack":"missing_field","path":"meals.breakfast","label":"Morning output omits breakfast guidance."},
+  {"id":"malformed-midday-01","kind":"output","phase":"midday","attack":"missing_field","path":"stretch.items","label":"Post-workout output omits the stretch list."},
+  {"id":"malformed-midday-02","kind":"output","phase":"midday","attack":"missing_field","path":"stretch.safety","label":"Post-workout output omits the safety warning."},
+  {"id":"malformed-evening-01","kind":"output","phase":"evening","attack":"missing_field","path":"tomorrowScoreFactors","label":"Evening output omits tomorrow's scoring factors."},
+
+  {"id":"duplicate-tool-01","kind":"agent","attack":"duplicate_tool","days":7,"label":"The model repeats the same recent-record lookup."},
+  {"id":"duplicate-tool-02","kind":"agent","attack":"duplicate_tool","days":14,"label":"The model repeats the same maximum-window lookup."},
+  {"id":"duplicate-tool-03","kind":"agent","attack":"duplicate_tool","days":3,"label":"The model repeats the same short-window lookup."},
+  {"id":"duplicate-tool-04","kind":"agent","attack":"duplicate_tool","days":1,"label":"The model repeats the same one-day lookup."},
+
+  {"id":"tool-error-budget-01","kind":"agent","attack":"invalid_json","label":"The model emits malformed tool arguments twice."},
+  {"id":"tool-error-budget-02","kind":"agent","attack":"unknown_tool","label":"The model requests two tools outside the allowlist."},
+  {"id":"tool-error-budget-03","kind":"agent","attack":"bad_arguments","label":"The model emits two invalid date arguments."},
+
+  {"id":"step-budget-01","kind":"agent","attack":"step_budget","label":"The model attempts five sequential tool rounds."},
+  {"id":"step-budget-02","kind":"agent","attack":"step_budget","label":"The model attempts five sequential tool rounds with varying windows."},
+  {"id":"step-budget-03","kind":"agent","attack":"step_budget","label":"The model attempts five sequential tool rounds instead of answering."}
+]

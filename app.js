@@ -219,6 +219,7 @@ function renderProvenance(provenance) {
     if (source.type === "tool_daily_record") return `${language === "en" ? "extra record" : "补充记录"} ${source.date}`;
     if (source.type === "tool_recent_records") return language === "en" ? "extra recent records" : "补充近期记录";
     if (source.type === "tool_derived_weight_trend") return language === "en" ? "extra weight trend" : "补充体重趋势";
+    if (source.type === "hybrid_pgvector_reranked") return language === "en" ? "reranked semantic history" : "向量召回与重排历史";
     return source.type;
   });
   const missing = Array.isArray(provenance.missingData) && provenance.missingData.length
@@ -333,7 +334,9 @@ async function runPhase({ phase, button, checkIn, images = [] }) {
     await loadRecords();
     const usedTools = Array.isArray(result.toolsUsed) && result.toolsUsed.length;
     const forcedFinish = result.agent?.forcedFinish;
-    renderCoachResponse(response, phase); renderProvenance(result.provenance); setStatus(language === "en" ? `AI Coach · ${forcedFinish ? "Limited-data fallback" : usedTools ? "Extra history read" : "Fixed memory loaded"}` : `AI 教练 · ${forcedFinish ? "已降级生成" : usedTools ? "已补充读取历史" : "固定记忆已加载"}`);
+    const observed = result.observability;
+    const telemetry = observed ? ` · ${(Number(observed.durationMs) / 1000).toFixed(1)}s${observed.estimatedCostUsd === null ? "" : ` · $${Number(observed.estimatedCostUsd).toFixed(4)}`}` : "";
+    renderCoachResponse(response, phase); renderProvenance(result.provenance); setStatus((language === "en" ? `AI Coach · ${forcedFinish ? "Limited-data fallback" : usedTools ? "Extra history read" : "Memory loaded"}` : `AI 教练 · ${forcedFinish ? "已降级生成" : usedTools ? "已补充读取历史" : "记忆已加载"}`) + telemetry);
   } catch (error) {
     setStatus(language === "en" ? "AI service unavailable" : "AI 服务未连接", "error"); $("empty-plan").classList.add("hidden"); $("plan-content").classList.remove("hidden");
     const title = checkInSaved ? (language === "en" ? "Check-in saved, but AI guidance failed" : "打卡已保存，但 AI 建议生成失败") : (language === "en" ? "This check-in was not saved" : "这次没有保存");

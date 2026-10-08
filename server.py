@@ -1,14 +1,19 @@
 import hashlib
 import hmac
 import json
+import math
 import os
+import re
 import secrets
 import sqlite3
+import time
+import uuid
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from http.cookies import SimpleCookie
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from urllib.error import HTTPError, URLError
+from urllib.parse import parse_qs, urlparse
 from urllib.request import Request, urlopen
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -17,6 +22,128 @@ DB_PATH = os.path.join(ROOT, "fitness.db")
 SESSION_DAYS = 30
 MAX_AGENT_STEPS = 4
 MAX_TOOL_ERRORS = 2
+VECTOR_CANDIDATES = 20
+VECTOR_RESULTS = 5
+EMBEDDING_BATCH_SIZE = 32
+
+
+def env_float(name):
+    value = os.environ.get(name)
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except ValueError as error:
+        raise RuntimeError(f"{name} 必须是数字") from error
+
+
+def embedding_dimensions():
+    try:
+        dimensions = int(os.environ.get("EMBEDDING_DIMENSIONS", "1536"))
+    except ValueError as error:
+        raise RuntimeError("EMBEDDING_DIMENSIONS 必须是整数") from error
+    if not 1 <= dimensions <= 2000:
+        raise RuntimeError("EMBEDDING_DIMENSIONS 必须位于 1-2000，才能建立 pgvector HNSW 索引")
+    return dimensions
+
+
+def vector_store_enabled():
+    return is_postgres() and bool(os.environ.get("EMBEDDING_API_KEY"))
+
+
+def estimate_cost(prompt_tokens=0, completion_tokens=0, input_rate=None, output_rate=None):
+    if input_rate is None and output_rate is None:
+        return None
+    input_rate = input_rate or 0.0
+    output_rate = output_rate or 0.0
+    return round((prompt_tokens * input_rate + completion_tokens * output_rate) / 1_000_000, 8)
+
+
+class TraceRecorder:
+    def __init__(self, user_id, date, phase):
+        self.trace_id = uuid.uuid4().hex
+        self.user_id = user_id
+        self.date = date
+        self.phase = phase
+        self.started_at = now().isoformat()
+        self.started_clock = time.perf_counter()
+        self.events = []
+        self.prompt_tokens = 0
+        self.completion_tokens = 0
+        self.embedding_tokens = 0
+        self.estimated_cost_usd = 0.0
+        self.cost_known = True
+        self.model = ""
+        self.status = "running"
+        self.error = None
+
+    @contextmanager
+    def span(self, name, **attributes):
+        started = time.perf_counter()
+        try:
+            yield
+        except Exception as error:
+            self.event(name, started, "error", {**attributes, "errorType": type(error).__name__})
+            raise
+        else:
+            self.event(name, started, "ok", attributes)
+
+    def event(self, name, started, status="ok", attributes=None):
+        self.events.append({
+            "name": name,
+            "status": status,
+            "durationMs": round((time.perf_counter() - started) * 1000, 2),
+            "attributes": attributes or {},
+        })
+
+    def record_model_call(self, model, started, usage):
+        prompt = int(usage.get("prompt_tokens") or 0)
+        completion = int(usage.get("completion_tokens") or 0)
+        has_usage = "prompt_tokens" in usage or "completion_tokens" in usage
+        cost = estimate_cost(
+            prompt, completion,
+            env_float("MODEL_INPUT_COST_PER_1M"),
+            env_float("MODEL_OUTPUT_COST_PER_1M"),
+        ) if has_usage else None
+        self.model = model
+        self.prompt_tokens += prompt
+        self.completion_tokens += completion
+        if cost is None:
+            self.cost_known = False
+        else:
+            self.estimated_cost_usd += cost
+        self.event("llm.chat", started, attributes={
+            "model": model, "promptTokens": prompt,
+            "completionTokens": completion, "estimatedCostUsd": cost,
+        })
+
+    def record_embedding_call(self, model, started, usage, input_count):
+        tokens = int(usage.get("prompt_tokens") or usage.get("total_tokens") or 0)
+        has_usage = "prompt_tokens" in usage or "total_tokens" in usage
+        cost = estimate_cost(tokens, 0, env_float("EMBEDDING_COST_PER_1M"), 0.0) if has_usage else None
+        self.embedding_tokens += tokens
+        if cost is None:
+            self.cost_known = False
+        else:
+            self.estimated_cost_usd += cost
+        self.event("llm.embedding", started, attributes={
+            "model": model, "inputCount": input_count,
+            "tokens": tokens, "estimatedCostUsd": cost,
+        })
+
+    def finish(self, status, error=None):
+        self.status = status
+        self.error = error
+
+    def summary(self):
+        return {
+            "traceId": self.trace_id,
+            "durationMs": round((time.perf_counter() - self.started_clock) * 1000, 2),
+            "promptTokens": self.prompt_tokens,
+            "completionTokens": self.completion_tokens,
+            "embeddingTokens": self.embedding_tokens,
+            "estimatedCostUsd": round(self.estimated_cost_usd, 8) if self.cost_known else None,
+        }
 
 
 def load_env():
@@ -43,6 +170,7 @@ def db():
             raise RuntimeError("使用 DATABASE_URL 需要安装 psycopg[binary]") from error
         connection = psycopg.connect(os.environ["DATABASE_URL"])
         try:
+            connection.execute("SET search_path TO public, extensions")
             yield connection, "%s"
             connection.commit()
         except Exception:
@@ -94,6 +222,13 @@ def init_db():
                     date TEXT NOT NULL, phase TEXT NOT NULL, output_json TEXT NOT NULL,
                     metadata_json TEXT NOT NULL, model TEXT NOT NULL, created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL, PRIMARY KEY (user_id, date, phase))""",
+                """CREATE TABLE IF NOT EXISTS request_traces (
+                    trace_id TEXT PRIMARY KEY, user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    date TEXT NOT NULL, phase TEXT NOT NULL, status TEXT NOT NULL,
+                    duration_ms DOUBLE PRECISION NOT NULL, model TEXT NOT NULL,
+                    prompt_tokens INTEGER NOT NULL, completion_tokens INTEGER NOT NULL,
+                    embedding_tokens INTEGER NOT NULL, estimated_cost_usd DOUBLE PRECISION,
+                    events_json TEXT NOT NULL, error_text TEXT, created_at TEXT NOT NULL)""",
             ]
         else:
             statements = [
@@ -115,9 +250,31 @@ def init_db():
                     output_json TEXT NOT NULL, metadata_json TEXT NOT NULL,
                     model TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
                     PRIMARY KEY (user_id, date, phase))""",
+                """CREATE TABLE IF NOT EXISTS request_traces (
+                    trace_id TEXT PRIMARY KEY, user_id INTEGER NOT NULL,
+                    date TEXT NOT NULL, phase TEXT NOT NULL, status TEXT NOT NULL,
+                    duration_ms REAL NOT NULL, model TEXT NOT NULL,
+                    prompt_tokens INTEGER NOT NULL, completion_tokens INTEGER NOT NULL,
+                    embedding_tokens INTEGER NOT NULL, estimated_cost_usd REAL,
+                    events_json TEXT NOT NULL, error_text TEXT, created_at TEXT NOT NULL)""",
             ]
         for statement in statements:
             query(connection, statement)
+        query(connection, """CREATE INDEX IF NOT EXISTS request_traces_user_created
+            ON request_traces (user_id, created_at DESC)""")
+        if vector_store_enabled():
+            dimensions = embedding_dimensions()
+            query(connection, "CREATE EXTENSION IF NOT EXISTS vector")
+            query(connection, f"""CREATE TABLE IF NOT EXISTS fitness_memory_chunks (
+                user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                date TEXT NOT NULL, chunk_type TEXT NOT NULL, content TEXT NOT NULL,
+                content_hash TEXT NOT NULL, metadata_json TEXT NOT NULL,
+                embedding_model TEXT NOT NULL, embedding vector({dimensions}) NOT NULL,
+                updated_at TEXT NOT NULL, PRIMARY KEY (user_id, date, chunk_type))""")
+            query(connection, """CREATE INDEX IF NOT EXISTS fitness_memory_chunks_embedding_hnsw
+                ON fitness_memory_chunks USING hnsw (embedding vector_cosine_ops)""")
+            query(connection, """CREATE INDEX IF NOT EXISTS fitness_memory_chunks_user_date
+                ON fitness_memory_chunks (user_id, date DESC)""")
     migrate_legacy_memory()
 
 
@@ -472,11 +629,236 @@ def derived_stats(records):
     }
 
 
+def record_embedding_document(record):
+    compact = compact_record(record)
+    return json.dumps(compact, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def request_embeddings(texts, trace=None):
+    if not texts:
+        return []
+    api_key = os.environ.get("EMBEDDING_API_KEY")
+    if not api_key:
+        raise RuntimeError("未配置 EMBEDDING_API_KEY")
+    base_url = os.environ.get("EMBEDDING_BASE_URL", "https://api.openai.com/v1").rstrip("/")
+    model = os.environ.get("EMBEDDING_MODEL", "text-embedding-3-small")
+    payload = {"model": model, "input": texts, "dimensions": embedding_dimensions()}
+    request = Request(
+        f"{base_url}/embeddings",
+        data=json.dumps(payload).encode(),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "User-Agent": "fitness-coach/1.0",
+        },
+        method="POST",
+    )
+    started = time.perf_counter()
+    try:
+        with urlopen(request, timeout=45) as response:
+            result = json.loads(response.read().decode())
+    except HTTPError as error:
+        detail = error.read().decode(errors="replace")[:500]
+        if trace:
+            trace.event("llm.embedding", started, "error", {"model": model, "httpStatus": error.code})
+        raise RuntimeError(f"Embedding 服务返回 {error.code}: {detail}") from error
+    except URLError as error:
+        if trace:
+            trace.event("llm.embedding", started, "error", {"model": model, "errorType": "URLError"})
+        raise RuntimeError(f"无法连接 Embedding 服务：{error.reason}") from error
+    ordered = sorted(result.get("data") or [], key=lambda item: item.get("index", 0))
+    embeddings = [item.get("embedding") for item in ordered]
+    if len(embeddings) != len(texts) or any(not isinstance(item, list) for item in embeddings):
+        raise RuntimeError("Embedding 服务返回数量不匹配")
+    dimensions = embedding_dimensions()
+    if any(len(item) != dimensions for item in embeddings):
+        raise RuntimeError(f"Embedding 向量维度必须为 {dimensions}")
+    if trace:
+        trace.record_embedding_call(model, started, result.get("usage") or {}, len(texts))
+    return embeddings
+
+
+def vector_literal(values):
+    return "[" + ",".join(format(float(value), ".10g") for value in values) + "]"
+
+
+def ensure_record_embeddings(user_id, records, trace=None):
+    if not vector_store_enabled() or not records:
+        return {"enabled": False, "indexed": 0}
+    model = os.environ.get("EMBEDDING_MODEL", "text-embedding-3-small")
+    pending = []
+    with db() as (connection, placeholder):
+        for record in records:
+            date = record.get("date")
+            if not date:
+                continue
+            content = record_embedding_document(record)
+            content_hash = hashlib.sha256(content.encode()).hexdigest()
+            row = query(connection, f"""SELECT content_hash,embedding_model
+                FROM fitness_memory_chunks WHERE user_id={placeholder} AND date={placeholder}
+                AND chunk_type='daily_facts'""", (user_id, date)).fetchone()
+            if not row or row[0] != content_hash or row[1] != model:
+                pending.append((date, content, content_hash, {
+                    "date": date,
+                    "hasMorning": bool(record.get("morning")),
+                    "hasMidday": bool(record.get("midday")),
+                    "hasEvening": bool(record.get("evening")),
+                }))
+    if not pending:
+        return {"enabled": True, "indexed": 0}
+    embeddings = []
+    for start in range(0, len(pending), EMBEDDING_BATCH_SIZE):
+        batch = pending[start:start + EMBEDDING_BATCH_SIZE]
+        embeddings.extend(request_embeddings([item[1] for item in batch], trace=trace))
+    with db() as (connection, _):
+        for (date, content, content_hash, metadata), embedding in zip(pending, embeddings):
+            query(connection, """INSERT INTO fitness_memory_chunks
+                (user_id,date,chunk_type,content,content_hash,metadata_json,embedding_model,embedding,updated_at)
+                VALUES (%s,%s,'daily_facts',%s,%s,%s,%s,%s::vector,%s)
+                ON CONFLICT (user_id,date,chunk_type) DO UPDATE SET
+                content=EXCLUDED.content,content_hash=EXCLUDED.content_hash,
+                metadata_json=EXCLUDED.metadata_json,embedding_model=EXCLUDED.embedding_model,
+                embedding=EXCLUDED.embedding,updated_at=EXCLUDED.updated_at""", (
+                    user_id, date, content, content_hash,
+                    json.dumps(metadata, ensure_ascii=False), model,
+                    vector_literal(embedding), now().isoformat(),
+                ))
+    return {"enabled": True, "indexed": len(pending)}
+
+
+def keyword_overlap(query_text, content):
+    pattern = r"[a-zA-Z0-9]+|[\u4e00-\u9fff]"
+    query_terms = set(re.findall(pattern, query_text.lower()))
+    content_terms = set(re.findall(pattern, content.lower()))
+    return len(query_terms & content_terms) / len(query_terms) if query_terms else 0.0
+
+
+def rerank_candidates(candidates, query_text, reference_date, limit=VECTOR_RESULTS):
+    try:
+        reference = datetime.strptime(reference_date, "%Y-%m-%d")
+    except ValueError:
+        reference = None
+    ranked = []
+    for candidate in candidates:
+        similarity = max(0.0, min(1.0, float(candidate.get("similarity") or 0.0)))
+        recency = 0.0
+        if reference:
+            try:
+                age = max(0, (reference - datetime.strptime(candidate["date"], "%Y-%m-%d")).days)
+                recency = 1 / (1 + age)
+            except (KeyError, ValueError):
+                pass
+        lexical = keyword_overlap(query_text, candidate.get("content", ""))
+        score = 0.75 * similarity + 0.15 * recency + 0.10 * lexical
+        ranked.append({**candidate, "rerankScore": round(score, 6), "lexicalScore": round(lexical, 6)})
+    return sorted(ranked, key=lambda item: (item["rerankScore"], item.get("date", "")), reverse=True)[:limit]
+
+
+def hybrid_vector_retrieve(user_id, query_text, before_or_on, trace=None, limit=VECTOR_RESULTS):
+    if not vector_store_enabled() or not query_text.strip():
+        return []
+    embedding = request_embeddings([query_text], trace=trace)[0]
+    vector = vector_literal(embedding)
+    model = os.environ.get("EMBEDDING_MODEL", "text-embedding-3-small")
+    with db() as (connection, _):
+        rows = query(connection, """SELECT date,content,metadata_json,
+            1 - (embedding <=> %s::vector) AS similarity
+            FROM fitness_memory_chunks
+            WHERE user_id=%s AND date<=%s AND embedding_model=%s
+            ORDER BY embedding <=> %s::vector LIMIT %s""", (
+                vector, user_id, before_or_on, model, vector, VECTOR_CANDIDATES,
+            )).fetchall()
+    candidates = [{
+        "date": row[0], "content": row[1],
+        "metadata": json.loads(row[2]), "similarity": float(row[3]),
+    } for row in rows]
+    return rerank_candidates(candidates, query_text, before_or_on, limit=limit)
+
+
+def persist_trace(trace):
+    summary = trace.summary()
+    with db() as (connection, placeholder):
+        query(connection, f"""INSERT INTO request_traces
+            (trace_id,user_id,date,phase,status,duration_ms,model,prompt_tokens,
+             completion_tokens,embedding_tokens,estimated_cost_usd,events_json,error_text,created_at)
+            VALUES ({','.join([placeholder] * 14)})""", (
+                trace.trace_id, trace.user_id, trace.date, trace.phase, trace.status,
+                summary["durationMs"], trace.model, summary["promptTokens"],
+                summary["completionTokens"], summary["embeddingTokens"],
+                summary["estimatedCostUsd"], json.dumps(trace.events, ensure_ascii=False),
+                trace.error, trace.started_at,
+            ))
+
+
+def safe_persist_trace(trace):
+    try:
+        persist_trace(trace)
+        return True
+    except Exception:
+        return False
+
+
+def percentile(values, percent):
+    if not values:
+        return None
+    ordered = sorted(float(value) for value in values)
+    index = max(0, math.ceil(percent / 100 * len(ordered)) - 1)
+    return round(ordered[index], 2)
+
+
+def trace_metrics(user_id, limit=100):
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError):
+        limit = 100
+    limit = max(1, min(1000, limit))
+    with db() as (connection, placeholder):
+        rows = query(connection, f"""SELECT duration_ms,estimated_cost_usd,prompt_tokens,
+            completion_tokens,embedding_tokens,status FROM request_traces
+            WHERE user_id={placeholder} ORDER BY created_at DESC LIMIT {placeholder}""",
+            (user_id, limit)).fetchall()
+    durations = [row[0] for row in rows]
+    costs = [row[1] for row in rows if row[1] is not None]
+    return {
+        "requestCount": len(rows),
+        "p50LatencyMs": percentile(durations, 50),
+        "p95LatencyMs": percentile(durations, 95),
+        "averageCostUsd": round(sum(costs) / len(costs), 8) if costs else None,
+        "totalCostUsd": round(sum(costs), 8) if costs else None,
+        "costedRequestCount": len(costs),
+        "promptTokens": sum(row[2] for row in rows),
+        "completionTokens": sum(row[3] for row in rows),
+        "embeddingTokens": sum(row[4] for row in rows),
+        "successRate": round(sum(row[5] == "ok" for row in rows) / len(rows), 4) if rows else None,
+    }
+
+
+def recent_traces(user_id, limit=20):
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError):
+        limit = 20
+    limit = max(1, min(100, limit))
+    with db() as (connection, placeholder):
+        rows = query(connection, f"""SELECT trace_id,date,phase,status,duration_ms,model,
+            prompt_tokens,completion_tokens,embedding_tokens,estimated_cost_usd,
+            events_json,error_text,created_at FROM request_traces
+            WHERE user_id={placeholder} ORDER BY created_at DESC LIMIT {placeholder}""",
+            (user_id, limit)).fetchall()
+    return [{
+        "traceId": row[0], "date": row[1], "phase": row[2], "status": row[3],
+        "durationMs": row[4], "model": row[5], "promptTokens": row[6],
+        "completionTokens": row[7], "embeddingTokens": row[8],
+        "estimatedCostUsd": row[9], "events": json.loads(row[10]),
+        "error": row[11], "createdAt": row[12],
+    } for row in rows]
+
+
 def previous_date(date):
     return (datetime.strptime(date, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
 
 
-def build_memory_context(user_id, check_in):
+def build_memory_context(user_id, check_in, trace=None):
     date = str(check_in.get("date", ""))
     try:
         datetime.strptime(date, "%Y-%m-%d")
@@ -488,6 +870,23 @@ def build_memory_context(user_id, check_in):
     recent_facts = fact_records(user_id, limit=14, before_or_on=date)
     stats = derived_stats(recent_facts)
     prior = record_by_date(user_id, previous_date(date)) if phase == "morning" else None
+    semantic_matches = []
+    vector_status = {"enabled": vector_store_enabled(), "indexed": 0, "retrieved": 0}
+    if vector_store_enabled():
+        started = time.perf_counter()
+        try:
+            vector_facts = fact_records(user_id, before_or_on=date)
+            index_status = ensure_record_embeddings(user_id, vector_facts, trace=trace)
+            query_text = json.dumps(check_in, ensure_ascii=False, sort_keys=True)
+            semantic_matches = hybrid_vector_retrieve(user_id, query_text, date, trace=trace)
+            vector_status.update(index_status)
+            vector_status["retrieved"] = len(semantic_matches)
+            if trace:
+                trace.event("retrieval.hybrid_pgvector", started, attributes=vector_status)
+        except Exception as error:
+            vector_status["error"] = type(error).__name__
+            if trace:
+                trace.event("retrieval.hybrid_pgvector", started, "error", vector_status)
     sources = []
     if profile["updatedAt"]:
         sources.append({"id": "profile:confirmed", "type": "confirmed_profile", "updatedAt": profile["updatedAt"]})
@@ -504,6 +903,13 @@ def build_memory_context(user_id, check_in):
             "id": f"derived:recent14:{stats['period']['from']}:{stats['period']['to']}",
             "type": "server_derived_stats", "period": stats["period"],
             "recordCount": stats["recordCount"],
+        })
+    if semantic_matches:
+        sources.append({
+            "id": f"hybrid_pgvector:{date}",
+            "type": "hybrid_pgvector_reranked",
+            "dates": [item["date"] for item in semantic_matches],
+            "resultCount": len(semantic_matches),
         })
     missing = []
     confirmed = profile["confirmed"]
@@ -536,6 +942,8 @@ def build_memory_context(user_id, check_in):
         "currentDay": compact_record(current) if current else None,
         "previousDay": compact_record(prior) if prior else None,
         "recent14DayStats": stats,
+        "semanticMatches": [json.loads(item["content"]) for item in semantic_matches],
+        "vectorRetrieval": vector_status,
         "provenance": provenance,
     }
     return memory, provenance
@@ -561,7 +969,7 @@ def execute_function(user_id, name, arguments):
     raise ValueError(f"不允许的工具：{name}")
 
 
-def request_model(base_url, api_key, model, messages, tools_enabled=True, require_tool=False):
+def request_model(base_url, api_key, model, messages, tools_enabled=True, require_tool=False, trace=None):
     request_body = {
         "model": model,
         "temperature": 0.3,
@@ -577,13 +985,21 @@ def request_model(base_url, api_key, model, messages, tools_enabled=True, requir
         request_body["response_format"] = {"type": "json_object"}
     request = Request(f"{base_url}/chat/completions", data=json.dumps(request_body).encode(),
         headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json", "User-Agent": "fitness-coach/1.0"}, method="POST")
+    started = time.perf_counter()
     try:
         with urlopen(request, timeout=90) as response:
             result = json.loads(response.read().decode())
     except HTTPError as error:
-        raise RuntimeError(f"模型服务返回 {error.code}: {error.read().decode(errors='replace')[:500]}") from error
+        detail = error.read().decode(errors="replace")[:500]
+        if trace:
+            trace.event("llm.chat", started, "error", {"model": model, "httpStatus": error.code})
+        raise RuntimeError(f"模型服务返回 {error.code}: {detail}") from error
     except URLError as error:
+        if trace:
+            trace.event("llm.chat", started, "error", {"model": model, "errorType": "URLError"})
         raise RuntimeError(f"无法连接模型服务：{error.reason}") from error
+    if trace:
+        trace.record_model_call(model, started, result.get("usage") or {})
     return result["choices"][0]["message"]
 
 
@@ -610,7 +1026,7 @@ def parse_model_content(message):
     return json.loads(message["content"])
 
 
-def call_model(payload, user_id):
+def call_model(payload, user_id, trace=None):
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         raise RuntimeError("服务端未配置 OPENAI_API_KEY")
@@ -627,7 +1043,7 @@ def call_model(payload, user_id):
     forced_reason = None
     allowed_tools = {tool["function"]["name"] for tool in FUNCTION_TOOLS}
     for step in range(MAX_AGENT_STEPS):
-        message = request_model(base_url, api_key, model, messages, tools_enabled=True, require_tool=False)
+        message = request_model(base_url, api_key, model, messages, tools_enabled=True, require_tool=False, trace=trace)
         tool_calls = message.get("tool_calls") or []
         if not tool_calls:
             return parse_model_content(message), used_tools, {
@@ -636,7 +1052,9 @@ def call_model(payload, user_id):
             }
         messages.append({"role": "assistant", "content": message.get("content"), "tool_calls": tool_calls})
         for tool_call in tool_calls:
+            tool_started = time.perf_counter()
             tool_name = (tool_call.get("function") or {}).get("name", "")
+            arguments = None
             try:
                 arguments = json.loads((tool_call.get("function") or {}).get("arguments") or "{}")
                 if not isinstance(arguments, dict):
@@ -669,6 +1087,13 @@ def call_model(payload, user_id):
                     except Exception:
                         tool_errors += 1
                         output = tool_error("TOOL_UNAVAILABLE", "历史记录工具暂时不可用，请使用本次输入提供保守建议。", False)
+            if trace:
+                trace.event("agent.tool", tool_started,
+                    "error" if output.get("ok") is False else "ok", {
+                        "tool": tool_name,
+                        "arguments": arguments if isinstance(arguments, dict) else None,
+                        "errorCode": (output.get("error") or {}).get("code"),
+                    })
             messages.append({"role": "tool", "tool_call_id": tool_call["id"], "content": json.dumps(output, ensure_ascii=False)})
         if duplicate_calls:
             break
@@ -681,7 +1106,7 @@ def call_model(payload, user_id):
         "role": "user",
         "content": "工具调用现已结束。请立即输出任务要求的最终 JSON，不得再调用工具。只能使用服务端固定记忆、本次输入和已经成功返回的工具结果；不得声称使用了固定 provenance 或成功工具结果之外的数据；若 fixedMemory.previousDay 为空，previousDayEvaluation.score 必须为 null。",
     })
-    final_message = request_model(base_url, api_key, model, messages, tools_enabled=False)
+    final_message = request_model(base_url, api_key, model, messages, tools_enabled=False, trace=trace)
     return parse_model_content(final_message), used_tools, {
         "forcedFinish": True, "reason": forced_reason,
         "toolErrors": tool_errors, "duplicateCalls": duplicate_calls,
@@ -706,7 +1131,7 @@ def prompt_for(body, memory):
     for image in images[:4]:
         if isinstance(image, str) and image.startswith("data:image/"):
             content.append({"type": "image_url", "image_url": {"url": image, "detail": "low"}})
-    system = f"""你是一名谨慎的健身教练 Agent。服务端已按阶段提供 fixedMemory，其中 confirmedProfile 是用户确认信息；currentDay 和 previousDay 的 morning、midday、evening 是用户事实，assignedTraining 是单独保存的 AI 计划，只能用于比较而不能视为实际完成；recent14DayStats 是服务端确定性计算结果；provenance 列出固定检索来源。不得猜测固定来源或成功工具结果中没有的数据。工具只用于可选补充，无需为了回答而调用。必须只输出任务指定结构的有效 JSON，不要 Markdown。所有面向用户的JSON值必须使用{language}。建议应具体、温和、可执行；不得诊断疾病。评分属于基于历史记录的模型估计而非医学结论，并应避免体重数字偏见。"""
+    system = f"""你是一名谨慎的健身教练 Agent。服务端已按阶段提供 fixedMemory，其中 confirmedProfile 是用户确认信息；currentDay 和 previousDay 的 morning、midday、evening 是用户事实，assignedTraining 是单独保存的 AI 计划，只能用于比较而不能视为实际完成；recent14DayStats 是服务端确定性计算结果；semanticMatches 是经过用户隔离、日期过滤、向量召回与重排的历史事实；provenance 列出固定检索来源。不得猜测固定来源或成功工具结果中没有的数据。工具只用于可选补充，无需为了回答而调用。必须只输出任务指定结构的有效 JSON，不要 Markdown。所有面向用户的JSON值必须使用{language}。建议应具体、温和、可执行；不得诊断疾病。评分属于基于历史记录的模型估计而非医学结论，并应避免体重数字偏见。"""
     return [{"role": "system", "content": system}, {"role": "user", "content": content}]
 
 
@@ -795,12 +1220,17 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_GET(self):
         path = self.request_path()
+        params = parse_qs(urlparse(self.path).query)
         if path == "/api/me":
             self.send_json(200, {"user": self.current_user()})
-        elif path == "/api/records":
+        elif path in ("/api/records", "/api/metrics", "/api/traces"):
             user = self.current_user()
             if not user:
                 self.send_json(401, {"error": "请先登录"})
+            elif path == "/api/metrics":
+                self.send_json(200, trace_metrics(user["id"], params.get("limit", ["100"])[0]))
+            elif path == "/api/traces":
+                self.send_json(200, {"traces": recent_traces(user["id"], params.get("limit", ["20"])[0])})
             else:
                 self.send_json(200, {"records": list_records(user["id"]), "profile": load_profile(user["id"])})
         else:
@@ -808,6 +1238,7 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_POST(self):
         path = self.request_path()
+        active_trace = None
         if path not in ("/api/register", "/api/login", "/api/logout", "/api/coach", "/api/records"):
             self.send_error(404)
             return
@@ -853,30 +1284,52 @@ class Handler(SimpleHTTPRequestHandler):
                 check_in = body.get("checkIn") or {}
                 phase = check_in.get("phase", "morning")
                 date = str(check_in.get("date", ""))
-                persist_check_in(user["id"], check_in)
-                memory, provenance = build_memory_context(user["id"], check_in)
-                plan, tools_used, agent_status = call_model(prompt_for(body, memory), user["id"])
+                active_trace = TraceRecorder(user["id"], date, phase)
+                with active_trace.span("check_in.persist"):
+                    persist_check_in(user["id"], check_in)
+                with active_trace.span("memory.build"):
+                    memory, provenance = build_memory_context(user["id"], check_in, trace=active_trace)
+                with active_trace.span("agent.run"):
+                    plan, tools_used, agent_status = call_model(prompt_for(body, memory), user["id"], trace=active_trace)
                 source_ids = {source["id"] for source in provenance["sources"]}
                 for source in agent_status.get("toolSources", []):
                     if source["id"] not in source_ids:
                         provenance["sources"].append(source)
                         source_ids.add(source["id"])
-                plan, validation = validate_coach_output(plan, phase, memory)
+                with active_trace.span("output.validate"):
+                    plan, validation = validate_coach_output(plan, phase, memory)
                 metadata = {
                     **provenance,
                     "agent": agent_status,
                     "validation": validation,
                     "optionalToolsUsed": tools_used,
                 }
-                save_coach_output(user["id"], date, phase, plan, metadata, agent_status["model"])
+                with active_trace.span("coach_output.persist"):
+                    save_coach_output(user["id"], date, phase, plan, metadata, agent_status["model"])
+                active_trace.finish("ok")
+                observability = active_trace.summary()
+                safe_persist_trace(active_trace)
+                active_trace = None
                 self.send_json(200, {
                     "plan": plan, "toolsUsed": tools_used, "agent": agent_status,
                     "provenance": provenance, "validation": validation,
+                    "observability": observability,
                 })
         except (ValueError, KeyError, json.JSONDecodeError) as error:
+            if active_trace:
+                active_trace.finish("error", str(error)[:500])
+                safe_persist_trace(active_trace)
             self.send_json(400, {"error": str(error)})
         except (OSError, RuntimeError) as error:
+            if active_trace:
+                active_trace.finish("error", str(error)[:500])
+                safe_persist_trace(active_trace)
             self.send_json(502, {"error": str(error)})
+        except Exception as error:
+            if active_trace:
+                active_trace.finish("error", type(error).__name__)
+                safe_persist_trace(active_trace)
+            self.send_json(500, {"error": "服务器内部错误"})
 
     def send_json(self, status, payload, cookie=None, clear_cookie=False):
         data = json.dumps(payload, ensure_ascii=False).encode()

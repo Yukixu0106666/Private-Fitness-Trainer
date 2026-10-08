@@ -1,6 +1,7 @@
 import json
 import os
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -235,6 +236,92 @@ class FactValidationTests(unittest.TestCase):
         self.assertIsNone(validated["previousDayEvaluation"]["score"])
         self.assertEqual(validated["previousDayEvaluation"]["date"], "")
         self.assertIn("cleared_unverified_previous_day_score", validation["adjustments"])
+
+
+class RetrievalAndObservabilityTests(unittest.TestCase):
+    def test_reranker_combines_similarity_recency_and_keyword_overlap(self):
+        candidates = [
+            {"date": "2026-09-01", "content": "游泳 30 分钟", "similarity": 0.91},
+            {"date": "2026-09-21", "content": "膝盖疼痛 快走", "similarity": 0.88},
+            {"date": "2026-09-20", "content": "正常训练", "similarity": 0.70},
+        ]
+        ranked = server.rerank_candidates(candidates, "今天膝盖疼痛", "2026-09-22", limit=2)
+        self.assertEqual(ranked[0]["date"], "2026-09-21")
+        self.assertEqual(len(ranked), 2)
+        self.assertIn("rerankScore", ranked[0])
+
+    def test_cost_and_nearest_rank_percentile_are_deterministic(self):
+        self.assertEqual(server.estimate_cost(1_000_000, 500_000, 0.15, 0.60), 0.45)
+        self.assertEqual(server.percentile([10, 20, 30, 40, 50], 95), 50.0)
+        self.assertIsNone(server.percentile([], 95))
+
+    def test_trace_persistence_and_metrics(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(server, "DB_PATH", os.path.join(directory, "fitness.db")):
+                server.init_db()
+                with server.db() as (connection, placeholder):
+                    cursor = server.query(connection,
+                        f"INSERT INTO users (email,password_hash,created_at) VALUES ({placeholder},{placeholder},{placeholder})",
+                        ("trace@example.com", "hash", "now"))
+                    user_id = cursor.lastrowid
+                trace = server.TraceRecorder(user_id, "2026-09-22", "morning")
+                trace.started_clock = time.perf_counter() - 0.1
+                trace.model = "test-model"
+                trace.prompt_tokens = 100
+                trace.completion_tokens = 20
+                trace.finish("ok")
+                server.persist_trace(trace)
+
+                metrics = server.trace_metrics(user_id)
+                traces = server.recent_traces(user_id)
+                self.assertEqual(metrics["requestCount"], 1)
+                self.assertGreaterEqual(metrics["p95LatencyMs"], 100)
+                self.assertEqual(metrics["promptTokens"], 100)
+                self.assertEqual(traces[0]["traceId"], trace.trace_id)
+
+    def test_embedding_response_records_usage(self):
+        response_body = {
+            "data": [{"index": 0, "embedding": [0.1, 0.2, 0.3]}],
+            "usage": {"prompt_tokens": 7, "total_tokens": 7},
+        }
+        trace = server.TraceRecorder(1, "2026-09-22", "morning")
+        with patch.dict(os.environ, {
+                "EMBEDDING_API_KEY": "test-key", "EMBEDDING_DIMENSIONS": "3",
+                "EMBEDDING_COST_PER_1M": "0.02"}), patch.object(server, "urlopen") as urlopen:
+            response = urlopen.return_value.__enter__.return_value
+            response.read.return_value = json.dumps(response_body).encode()
+            embeddings = server.request_embeddings(["测试"], trace=trace)
+        self.assertEqual(embeddings, [[0.1, 0.2, 0.3]])
+        self.assertEqual(trace.embedding_tokens, 7)
+        self.assertEqual(trace.events[0]["name"], "llm.embedding")
+
+    def test_memory_context_includes_reranked_vector_facts_and_provenance(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(server, "DB_PATH", os.path.join(directory, "fitness.db")):
+                server.init_db()
+                with server.db() as (connection, placeholder):
+                    cursor = server.query(connection,
+                        f"INSERT INTO users (email,password_hash,created_at) VALUES ({placeholder},{placeholder},{placeholder})",
+                        ("vector@example.com", "hash", "now"))
+                    user_id = cursor.lastrowid
+                server.save_record(user_id, {
+                    "date": "2026-09-21", "goal": "health", "height": 158,
+                    "morning": {"sleep": "6", "notes": "膝盖疼痛"},
+                })
+                match = {
+                    "date": "2026-09-21",
+                    "content": json.dumps({"date": "2026-09-21", "morning": {"notes": "膝盖疼痛"}}),
+                    "similarity": 0.9, "rerankScore": 0.88,
+                }
+                with patch.object(server, "vector_store_enabled", return_value=True), \
+                        patch.object(server, "ensure_record_embeddings", return_value={"enabled": True, "indexed": 1}), \
+                        patch.object(server, "hybrid_vector_retrieve", return_value=[match]):
+                    memory, provenance = server.build_memory_context(user_id, {
+                        "phase": "morning", "date": "2026-09-22", "notes": "膝盖不适",
+                    })
+                self.assertEqual(memory["semanticMatches"][0]["date"], "2026-09-21")
+                self.assertEqual(memory["vectorRetrieval"]["retrieved"], 1)
+                self.assertIn("hybrid_pgvector_reranked", {item["type"] for item in provenance["sources"]})
 
 
 if __name__ == "__main__":

@@ -20,11 +20,40 @@
 
 服务端会按阶段固定准备记忆：已确认的长期画像、当天事实记录、早间所需的前一天完整记录，以及根据最近 14 天事实由 Python 计算出的体重、睡眠、精力和训练统计。这些必要信息不依赖模型主动想起并调用工具；Function Calling 只用于补充查询指定日期或近期记录。
 
+连接 PostgreSQL/Supabase 并配置 Embedding 服务后，服务端会启用 pgvector：把每日事实记录批量生成 embedding，以 `user_id` 和截止日期做 metadata filter，先按 cosine distance 召回最多 20 条候选，再结合向量相似度（75%）、时间新近度（15%）和关键词重合度（10%）重排，向模型提供前 5 条历史事实。未配置 Embedding 或在本地使用 SQLite 时，会自动保留原有 SQL 时间检索，不影响打卡。
+
 记忆分为三层：`records` 只保存用户打卡事实，`user_profiles` 保存用户明确确认的目标、器械、饮食偏好和长期限制，`coach_outputs` 单独保存 AI 建议、模型版本、证据来源与校验结果。旧版混合记录会在启动时迁移到分层结构。页面会在建议下方显示本次使用的数据来源和缺失信息。
 
 模型输出保存前会经过后端结构和事实校验。例如没有前一天记录时，服务端会强制清空昨日评分；评分日期只能是实际检索到的前一天，分数必须位于 0–100。格式不完整的回答不会写入 AI 产物层。
 
 每次提交会先保存原始打卡，再请求 AI 建议，因此模型或工具临时失败时也不会丢失记录。工具错误会以结构化结果返回给模型，允许模型修正一次；相同工具和参数不会重复执行。达到重复调用、两次工具错误或四轮调用上限后，服务端会关闭工具并要求模型根据已有信息生成一份明确标注信息受限的保守建议。
+
+## 行为评测
+
+`evals/adversarial_cases.json` 包含 30 条从已知 guardrail 行为设计的失败轨迹，覆盖无历史依据的评分、错误日期、越界分数、缺失输出字段、重复工具调用、连续工具错误和超出 Agent 步数预算。它们用于确定性回归测试，防止已经修复的 failure mode 再次出现。
+
+当前回归结果分开记录为：15 条自动修正、5 条拒绝保存、10 条终止工具循环并强制保守回答。由于用例是针对现有规则设计的，并且尚未包含正常输出对照组，这组结果不能用于声称 guardrail 对未知输入的召回率、准确率或误伤率，也不作为简历效果指标。
+
+运行评测：
+
+```bash
+python3 evals/run_adversarial_eval.py --output evals/adversarial_results.json
+```
+
+GitHub Actions 会在每次 push 和 pull request 中同时运行单元测试与这组行为评测，防止 guardrail 回归。
+
+## Tracing、延迟和成本
+
+每次 `/api/coach` 请求都会生成独立 `traceId`，记录打卡保存、记忆构建、向量检索、每次 LLM/Embedding 请求、工具调用、输出校验和结果持久化的耗时与状态。Trace 只保存阶段 metadata、token 数和工具参数，不保存完整模型 prompt 或餐食照片。
+
+模型服务返回 usage 时，系统会记录 prompt、completion 和 embedding token。配置每百万 token 费率后，会计算单次请求成本；没有配置费率时成本保持为 `null`，不会用猜测价格代替真实配置。
+
+登录后可读取：
+
+- `GET /api/traces?limit=20`：最近请求及 span；
+- `GET /api/metrics?limit=100`：最近请求的 p50/p95 延迟、平均/总成本、token 总量和成功率。
+
+`/api/coach` 的响应也会返回 `observability`，包含本次请求的 trace ID、延迟、token 和估算成本。
 
 ## 在本地运行
 
@@ -52,6 +81,25 @@ OPENAI_MODEL=openai/gpt-oss-20b
 
 `OPENAI_MODEL` 应填写你的账号实际可用的模型。只填写以 `gsk_` 开头的 Key 时，服务端也会自动把请求地址切换到 Groq。
 
+要在 Supabase 上启用 pgvector hybrid retrieval，还需配置：
+
+```env
+EMBEDDING_API_KEY=sk-...
+EMBEDDING_BASE_URL=https://api.openai.com/v1
+EMBEDDING_MODEL=text-embedding-3-small
+EMBEDDING_DIMENSIONS=1536
+```
+
+应用启动时会执行 `CREATE EXTENSION IF NOT EXISTS vector` 并创建带 HNSW cosine index 的 `fitness_memory_chunks` 表。Embedding 维度必须与所选模型一致；表创建后更换维度需要迁移现有向量列。
+
+如需成本统计，再按当前供应商价格填写：
+
+```env
+MODEL_INPUT_COST_PER_1M=
+MODEL_OUTPUT_COST_PER_1M=
+EMBEDDING_COST_PER_1M=
+```
+
 启动服务：
 
 ```bash
@@ -77,6 +125,7 @@ python3 server.py
 - API Key 只由服务端读取，不会发送到浏览器；
 - 密码使用 PBKDF2-HMAC-SHA256 保存，会话 Cookie 设置为 HttpOnly 和 SameSite；
 - 餐食照片会发送给配置的模型服务，每次最多 4 张，请不要上传他人的脸或敏感信息；
+- 启用向量检索时，结构化健身记录会发送给配置的 Embedding 服务生成向量；
 - AI 服务有频率和 token 限制，繁忙时可能需要稍后重试；
 - 健身和饮食建议只适合作为日常参考，不能用于疾病诊断；
 - 出现疼痛、胸闷、眩晕或其他明显异常时，应停止训练并咨询专业人士。

@@ -14,5 +14,19 @@ services:
         value: https://api.openai.com/v1
       - key: OPENAI_MODEL
         value: gpt-4o-mini
+      - key: EMBEDDING_API_KEY
+        sync: false
+      - key: EMBEDDING_BASE_URL
+        value: https://api.openai.com/v1
+      - key: EMBEDDING_MODEL
+        value: text-embedding-3-small
+      - key: EMBEDDING_DIMENSIONS
+        value: "1536"
+      - key: MODEL_INPUT_COST_PER_1M
+        sync: false
+      - key: MODEL_OUTPUT_COST_PER_1M
+        sync: false
+      - key: EMBEDDING_COST_PER_1M
+        sync: false
       - key: COOKIE_SECURE
         value: "true"
