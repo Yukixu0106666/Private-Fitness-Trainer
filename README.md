@@ -104,6 +104,13 @@ MODEL_OUTPUT_COST_PER_1M=
 EMBEDDING_COST_PER_1M=
 ```
 
+部署到公网时，建议把允许访问 API 的站点来源设置为正式域名（多个来源用逗号分隔）：
+
+```env
+ALLOWED_ORIGINS=https://你的域名.example
+COOKIE_SECURE=true
+```
+
 启动服务：
 
 ```bash

@@ -221,6 +221,28 @@ class RecordPersistenceTests(unittest.TestCase):
 
 
 class FactValidationTests(unittest.TestCase):
+    def test_record_rejects_invalid_measurements_and_future_date(self):
+        with self.assertRaisesRegex(ValueError, "身高"):
+            server.validate_record_input({"date": "2026-09-22", "height": 99})
+        future = (server.now() + server.timedelta(days=2)).strftime("%Y-%m-%d")
+        with self.assertRaisesRegex(ValueError, "日期"):
+            server.validate_record_input({"date": future})
+
+    def test_image_validation_enforces_count_type_and_size(self):
+        server.validate_images(["data:image/jpeg;base64,AA=="])
+        with self.assertRaisesRegex(ValueError, "最多"):
+            server.validate_images(["data:image/png;base64,AA=="] * 5)
+        with self.assertRaisesRegex(ValueError, "格式"):
+            server.validate_images(["data:image/svg+xml;base64,AA=="])
+
+    def test_rate_limit_returns_retry_after(self):
+        key = ("test", time.time_ns())
+        self.assertEqual(server.rate_limit(key, 2, 60, clock=100), (True, 0))
+        self.assertEqual(server.rate_limit(key, 2, 60, clock=101), (True, 0))
+        allowed, retry_after = server.rate_limit(key, 2, 60, clock=102)
+        self.assertFalse(allowed)
+        self.assertEqual(retry_after, 58)
+
     def test_unverified_previous_day_score_is_removed(self):
         output = {
             "title": "今日计划", "summary": "根据今天状态安排。",

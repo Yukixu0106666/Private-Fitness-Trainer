@@ -1,5 +1,4 @@
 const $ = (id) => document.getElementById(id);
-const height = 158;
 const today = new Date();
 const isoDate = (date) => {
   const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
@@ -20,7 +19,7 @@ const enText = {
   "今天的教练": "Today's coach", "早": "AM", "中": "MID", "晚": "PM", "早上计划": "Morning plan", "状态与今日安排": "Status and daily plan",
   "训练完成": "Workout done", "运动与拉伸": "Exercise and stretching", "晚上复盘": "Evening review", "饮食与排便": "Food and digestion",
   "早上好，先看看今天的身体状态": "Good morning — let's check how your body feels", "你的目标": "Your goal", "减脂塑形": "Fat loss & shaping",
-  "增肌增力": "Build muscle & strength", "提升体能": "Improve fitness", "保持健康": "Stay healthy", "晨起体重（kg）": "Morning weight (kg)",
+  "增肌增力": "Build muscle & strength", "提升体能": "Improve fitness", "保持健康": "Stay healthy", "身高（cm）": "Height (cm)", "晨起体重（kg）": "Morning weight (kg)",
   "睡眠（小时）": "Sleep (hours)", "建议晨起、如厕、早餐前称重，趋势更有参考价值。": "For a useful trend, weigh after using the bathroom and before breakfast.",
   "精力": "Energy", "肌肉酸痛": "Muscle soreness", "可运动时间": "Time available", "身体不适或特别安排": "Pain or special considerations",
   "可选": "Optional", "生成今天的饮食与运动计划": "Create today's meal and workout plan", "练完了，记录实际完成情况": "Workout complete — log what you actually did",
@@ -60,7 +59,7 @@ function applyLanguage() {
     if (!originalPlaceholder.has(element)) originalPlaceholder.set(element, element.placeholder);
     const original = originalPlaceholder.get(element);
     element.placeholder = language === "en" ? ({
-      "例如：55.05": "e.g. 55.05", "运动名称，如快走": "Exercise, e.g. brisk walking", "例如：右膝不舒服，今天只能在家练": "e.g. My right knee hurts; I can only train at home",
+      "例如：168": "e.g. 168", "例如：55.05": "e.g. 55.05", "运动名称，如快走": "Exercise, e.g. brisk walking", "例如：右膝不舒服，今天只能在家练": "e.g. My right knee hurts; I can only train at home",
       "例如：腿比较紧，左肩活动时不舒服": "e.g. Tight legs and left shoulder discomfort", "按早餐、午餐、晚餐和加餐记录，尽量写上大致分量": "List breakfast, lunch, dinner, snacks, and approximate portions",
       "例如：晚饭后很撑、今天喝水比较少": "e.g. Felt too full after dinner and drank little water", "例如：瑜伽垫、哑铃、弹力带": "e.g. yoga mat, dumbbells, resistance bands", "例如：不吃牛肉、乳糖不耐": "e.g. no beef, lactose intolerant", "只填写希望教练长期记住的信息": "Only enter information you want the coach to remember"
     }[original] || original) : original;
@@ -167,7 +166,15 @@ $("language-toggle").addEventListener("click", () => {
 });
 
 $("food-photos").addEventListener("change", (event) => {
-  photos = Array.from(event.target.files || []);
+  const selected = Array.from(event.target.files || []);
+  const supported = new Set(["image/jpeg", "image/png", "image/webp"]);
+  if (selected.length > 4 || selected.some((photo) => !supported.has(photo.type) || photo.size > 4 * 1024 * 1024)) {
+    photos = [];
+    event.target.value = "";
+    $("photo-preview").innerHTML = `<div class="upload-hint">${language === "en" ? "Choose up to 4 JPEG, PNG, or WebP images, no more than 4 MB each." : "最多选择 4 张 JPEG、PNG 或 WebP 图片，每张不超过 4 MB。"}</div>`;
+    return;
+  }
+  photos = selected;
   $("photo-preview").innerHTML = photos.length ? photos.map((photo) => `<img src="${URL.createObjectURL(photo)}" alt="饮食照片" />`).join("") : '<div class="upload-hint">可上传餐食照片帮助 AI 判断搭配</div>';
 });
 
@@ -250,6 +257,7 @@ function populateForms() {
   const midday = record.midday || record;
   const evening = record.evening || record;
   setValue("goal", record.goal, profile.goal || "fat-loss"); setValue("weight", morning.weight); setValue("sleep", morning.sleep, "7");
+  setValue("profile-height", profile.height ?? record.height);
   setValue("profile-equipment", profile.equipment); setValue("profile-diet", profile.dietaryPreferences); setValue("profile-constraints", profile.constraints);
   setValue("energy", morning.energy, "3"); setValue("soreness", morning.soreness, "2"); setValue("available-time", morning.availableTime, "45"); setValue("morning-notes", morning.notes);
   $("exercise-list").innerHTML = "";
@@ -312,7 +320,8 @@ async function runPhase({ phase, button, checkIn, images = [] }) {
   const factualCheckIn = { ...checkIn };
   const profileUpdate = factualCheckIn.profileUpdate;
   delete factualCheckIn.profileUpdate;
-  const existing = currentRecord() || { date: $("log-date").value, height };
+  const height = Number($("profile-height").value);
+  const existing = currentRecord() || { date: $("log-date").value };
   const record = { ...existing, date: $("log-date").value, height, goal: $("goal").value };
   record._invalidatePhase = phase;
   if (phase === "morning") { Object.assign(record, { morning: factualCheckIn, _profile: profileUpdate }); delete record.plan; }
@@ -346,7 +355,8 @@ async function runPhase({ phase, button, checkIn, images = [] }) {
 
 $("morning-form").addEventListener("submit", (event) => {
   event.preventDefault();
-  runPhase({ phase: "morning", button: $("morning-submit"), checkIn: { date: $("log-date").value, goal: $("goal").value, height, weight: $("weight").value, sleep: $("sleep").value, energy: $("energy").value, soreness: $("soreness").value, availableTime: $("available-time").value, notes: $("morning-notes").value.trim(), profileUpdate: { equipment: $("profile-equipment").value.trim(), dietaryPreferences: $("profile-diet").value.trim(), constraints: $("profile-constraints").value.trim() } } });
+  const height = Number($("profile-height").value);
+  runPhase({ phase: "morning", button: $("morning-submit"), checkIn: { date: $("log-date").value, goal: $("goal").value, height, weight: $("weight").value, sleep: $("sleep").value, energy: $("energy").value, soreness: $("soreness").value, availableTime: $("available-time").value, notes: $("morning-notes").value.trim(), profileUpdate: { height, equipment: $("profile-equipment").value.trim(), dietaryPreferences: $("profile-diet").value.trim(), constraints: $("profile-constraints").value.trim() } } });
 });
 
 $("midday-form").addEventListener("submit", (event) => {

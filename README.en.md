@@ -110,6 +110,13 @@ MODEL_OUTPUT_COST_PER_1M=
 EMBEDDING_COST_PER_1M=
 ```
 
+For a public deployment, allow only your production site origin (comma-separate multiple origins):
+
+```env
+ALLOWED_ORIGINS=https://your-domain.example
+COOKIE_SECURE=true
+```
+
 Start the server:
 
 ```bash

@@ -6,6 +6,7 @@ import os
 import re
 import secrets
 import sqlite3
+import threading
 import time
 import uuid
 from contextlib import contextmanager
@@ -25,6 +26,98 @@ MAX_TOOL_ERRORS = 2
 VECTOR_CANDIDATES = 20
 VECTOR_RESULTS = 5
 EMBEDDING_BATCH_SIZE = 32
+LOGIN_RATE_LIMIT = 10
+LOGIN_RATE_WINDOW = 15 * 60
+COACH_RATE_LIMIT = 20
+COACH_RATE_WINDOW = 60 * 60
+TEXT_LIMIT = 2000
+_rate_events = {}
+_rate_lock = threading.Lock()
+
+
+def allowed_origins():
+    configured = os.environ.get("ALLOWED_ORIGINS", "http://localhost:8000,http://127.0.0.1:8000")
+    return {item.strip() for item in configured.split(",") if item.strip()}
+
+
+def rate_limit(key, limit, window, clock=None):
+    current = time.time() if clock is None else clock
+    cutoff = current - window
+    with _rate_lock:
+        if len(_rate_events) > 10000:
+            stale_keys = [stored_key for stored_key, timestamps in _rate_events.items() if not timestamps or timestamps[-1] <= cutoff]
+            for stored_key in stale_keys:
+                _rate_events.pop(stored_key, None)
+        events = [timestamp for timestamp in _rate_events.get(key, []) if timestamp > cutoff]
+        if len(events) >= limit:
+            return False, max(1, math.ceil(events[0] + window - current))
+        events.append(current)
+        _rate_events[key] = events
+    return True, 0
+
+
+def validate_date(value):
+    if not isinstance(value, str):
+        raise ValueError("记录缺少有效日期")
+    try:
+        parsed = datetime.strptime(value, "%Y-%m-%d").date()
+    except ValueError as error:
+        raise ValueError("记录缺少有效日期") from error
+    if parsed.year < 2000 or parsed > (now() + timedelta(days=1)).date():
+        raise ValueError("记录日期超出允许范围")
+    return value
+
+
+def validate_number(value, name, minimum, maximum, required=False):
+    if value in (None, ""):
+        if required:
+            raise ValueError(f"{name}不能为空")
+        return
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"{name}必须是数字") from error
+    if not math.isfinite(number) or not minimum <= number <= maximum:
+        raise ValueError(f"{name}必须位于 {minimum}-{maximum} 之间")
+
+
+def validate_text_fields(value, path="记录"):
+    if isinstance(value, str) and len(value) > TEXT_LIMIT:
+        raise ValueError(f"{path}内容过长")
+    if isinstance(value, dict):
+        for key, item in value.items():
+            validate_text_fields(item, f"{path}.{key}")
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            validate_text_fields(item, f"{path}[{index}]")
+
+
+def validate_record_input(record):
+    validate_date(record.get("date"))
+    validate_text_fields(record)
+    if record.get("goal") not in (None, "", "fat-loss", "muscle", "fitness", "health"):
+        raise ValueError("未知健身目标")
+    if "height" in record:
+        validate_number(record.get("height"), "身高", 100, 250)
+    morning = record.get("morning") if isinstance(record.get("morning"), dict) else {}
+    validate_number(morning.get("weight"), "体重", 20, 300)
+    validate_number(morning.get("sleep"), "睡眠", 0, 24)
+    validate_number(morning.get("energy"), "精力", 1, 5)
+    validate_number(morning.get("soreness"), "酸痛", 1, 5)
+    midday = record.get("midday") if isinstance(record.get("midday"), dict) else {}
+    validate_number(midday.get("totalDuration"), "训练时长", 0, 1440)
+
+
+def validate_images(images):
+    if images in (None, []):
+        return
+    if not isinstance(images, list) or len(images) > 4:
+        raise ValueError("餐食照片最多上传 4 张")
+    for image in images:
+        if not isinstance(image, str) or not re.match(r"^data:image/(jpeg|png|webp);base64,", image, re.IGNORECASE):
+            raise ValueError("餐食照片格式仅支持 JPEG、PNG 或 WebP")
+        if len(image) > 6 * 1024 * 1024:
+            raise ValueError("单张餐食照片过大")
 
 
 def env_float(name):
@@ -419,13 +512,8 @@ def update_profile(user_id, values, allow_clear=False):
 def save_record(user_id, record):
     if not isinstance(record, dict):
         raise ValueError("记录格式无效")
+    validate_record_input(record)
     date = record.get("date")
-    if not isinstance(date, str):
-        raise ValueError("记录格式无效")
-    try:
-        datetime.strptime(date, "%Y-%m-%d")
-    except ValueError as error:
-        raise ValueError("记录缺少有效日期") from error
     timestamp = now().isoformat()
     profile_update = record.get("_profile") if isinstance(record.get("_profile"), dict) else {}
     invalidate_phase = record.get("_invalidatePhase")
@@ -1209,7 +1297,20 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
             self.send_header("Pragma", "no-cache")
             self.send_header("Expires", "0")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "same-origin")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Content-Security-Policy", "default-src 'self'; img-src 'self' blob: data:; style-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
         super().end_headers()
+
+    def origin(self):
+        origin = self.headers.get("Origin")
+        scheme = self.headers.get("X-Forwarded-Proto", "http").split(",", 1)[0].strip()
+        same_origin = f"{scheme}://{self.headers.get('Host', '')}"
+        return origin if origin in allowed_origins() or origin == same_origin else None
+
+    def client_ip(self):
+        return self.client_address[0]
 
     def token(self):
         cookies = SimpleCookie(self.headers.get("Cookie", ""))
@@ -1242,17 +1343,28 @@ class Handler(SimpleHTTPRequestHandler):
         if path not in ("/api/register", "/api/login", "/api/logout", "/api/coach", "/api/records"):
             self.send_error(404)
             return
+        if self.headers.get("Origin") and not self.origin():
+            self.send_json(403, {"error": "不允许的请求来源"})
+            return
         if path == "/api/logout":
             delete_session(self.token())
             self.send_json(200, {"ok": True}, clear_cookie=True)
             return
         try:
+            content_type = self.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
+            if content_type != "application/json":
+                self.send_json(415, {"error": "请求必须使用 application/json"})
+                return
             length = int(self.headers.get("Content-Length", "0"))
             if length <= 0 or length > MAX_BODY:
                 self.send_json(413, {"error": "请求过大"})
                 return
             body = json.loads(self.rfile.read(length))
             if path in ("/api/register", "/api/login"):
+                allowed, retry_after = rate_limit(("auth", self.client_ip()), LOGIN_RATE_LIMIT, LOGIN_RATE_WINDOW)
+                if not allowed:
+                    self.send_json(429, {"error": "尝试次数过多，请稍后再试"}, extra_headers={"Retry-After": str(retry_after)})
+                    return
                 email, password = str(body.get("email", "")).strip().lower(), str(body.get("password", ""))
                 if len(email) < 5 or "@" not in email or len(password) < 8:
                     self.send_json(400, {"error": "请输入有效邮箱和至少 8 位密码"})
@@ -1281,7 +1393,12 @@ class Handler(SimpleHTTPRequestHandler):
                 save_record(user["id"], body)
                 self.send_json(201, {"ok": True, "profile": load_profile(user["id"])})
             else:
+                allowed, retry_after = rate_limit(("coach", user["id"]), COACH_RATE_LIMIT, COACH_RATE_WINDOW)
+                if not allowed:
+                    self.send_json(429, {"error": "AI 教练请求过于频繁，请稍后再试"}, extra_headers={"Retry-After": str(retry_after)})
+                    return
                 check_in = body.get("checkIn") or {}
+                validate_images(body.get("images", []))
                 phase = check_in.get("phase", "morning")
                 date = str(check_in.get("date", ""))
                 active_trace = TraceRecorder(user["id"], date, phase)
@@ -1331,13 +1448,18 @@ class Handler(SimpleHTTPRequestHandler):
                 safe_persist_trace(active_trace)
             self.send_json(500, {"error": "服务器内部错误"})
 
-    def send_json(self, status, payload, cookie=None, clear_cookie=False):
+    def send_json(self, status, payload, cookie=None, clear_cookie=False, extra_headers=None):
         data = json.dumps(payload, ensure_ascii=False).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
-        self.send_header("Access-Control-Allow-Origin", self.headers.get("Origin", "http://localhost:8000"))
-        self.send_header("Access-Control-Allow-Credentials", "true")
+        origin = self.origin()
+        if origin:
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Access-Control-Allow-Credentials", "true")
+            self.send_header("Vary", "Origin")
+        for key, value in (extra_headers or {}).items():
+            self.send_header(key, value)
         if cookie or clear_cookie:
             value = "" if clear_cookie else cookie
             max_age = 0 if clear_cookie else SESSION_DAYS * 86400
@@ -1347,8 +1469,12 @@ class Handler(SimpleHTTPRequestHandler):
         self.wfile.write(data)
 
     def do_OPTIONS(self):
+        origin = self.origin()
+        if not origin:
+            self.send_error(403)
+            return
         self.send_response(204)
-        self.send_header("Access-Control-Allow-Origin", self.headers.get("Origin", "http://localhost:8000"))
+        self.send_header("Access-Control-Allow-Origin", origin)
         self.send_header("Access-Control-Allow-Credentials", "true")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")

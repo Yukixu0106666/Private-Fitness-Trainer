@@ -47,6 +47,7 @@
           <form id="morning-form" class="phase-form">
             <div class="phase-heading"><div><p class="section-kicker">MORNING CHECK-IN</p><h3>早上好，先看看今天的身体状态</h3></div><span id="morning-saved" class="saved-mark"></span></div>
             <label class="field"><span>你的目标</span><select id="goal"><option value="fat-loss">减脂塑形</option><option value="muscle">增肌增力</option><option value="fitness">提升体能</option><option value="health">保持健康</option></select></label>
+            <label class="field"><span>身高（cm）</span><input id="profile-height" type="number" min="100" max="250" step="1" placeholder="例如：168" required /></label>
             <details class="memory-settings">
               <summary>长期记忆设置 <small>由你确认后保存</small></summary>
               <label class="field"><span>可用器械 <em>可选</em></span><input id="profile-equipment" type="text" placeholder="例如：瑜伽垫、哑铃、弹力带" /></label>
@@ -84,7 +85,7 @@
           <form id="evening-form" class="phase-form hidden">
             <div class="phase-heading"><div><p class="section-kicker">EVENING REVIEW</p><h3>晚上好，完成今天的饮食与身体复盘</h3></div><span id="evening-saved" class="saved-mark"></span></div>
             <label class="field"><span>今天一整天吃了什么？</span><textarea id="food" rows="5" placeholder="按早餐、午餐、晚餐和加餐记录，尽量写上大致分量"></textarea></label>
-            <label class="field"><span>饮食照片 <em>可选</em></span><input id="food-photos" type="file" accept="image/*" multiple /><div id="photo-preview" class="photo-preview"><div class="upload-hint">可上传餐食照片帮助 AI 判断搭配</div></div></label>
+            <label class="field"><span>饮食照片 <em>可选，最多 4 张，每张 4 MB</em></span><input id="food-photos" type="file" accept="image/jpeg,image/png,image/webp" multiple /><div id="photo-preview" class="photo-preview"><div class="upload-hint">可上传餐食照片帮助 AI 判断搭配</div></div></label>
             <div class="wellness-heading"><span>一整天排便情况</span><small>帮助教练调整纤维和饮水</small></div>
             <div class="metrics">
               <label class="field"><span>次数</span><select id="bowel-frequency"><option value="0">没有</option><option value="1" selected>1 次</option><option value="2">2 次</option><option value="3">3 次或以上</option></select></label>
