@@ -1361,7 +1361,7 @@ class Handler(SimpleHTTPRequestHandler):
                 return
             body = json.loads(self.rfile.read(length))
             if path in ("/api/register", "/api/login"):
-                allowed, retry_after = rate_limit(("auth", self.client_ip()), LOGIN_RATE_LIMIT, LOGIN_RATE_WINDOW)
+                allowed, retry_after = rate_limit(("auth", path, self.client_ip()), LOGIN_RATE_LIMIT, LOGIN_RATE_WINDOW)
                 if not allowed:
                     self.send_json(429, {"error": "尝试次数过多，请稍后再试"}, extra_headers={"Retry-After": str(retry_after)})
                     return

@@ -6,6 +6,7 @@ const isoDate = (date) => {
 };
 
 let photos = [];
+let photoPreviewUrls = [];
 let records = [];
 let profile = {};
 let registerMode = false;
@@ -161,9 +162,45 @@ $("language-toggle").addEventListener("click", () => {
   language = language === "zh" ? "en" : "zh";
   localStorage.setItem("fitness-coach-language", language);
   applyLanguage();
+  if (photos.length) renderPhotoPreviews();
   renderHistory();
   renderSavedResponse();
 });
+
+function renderPhotoPreviews(message = "") {
+  photoPreviewUrls.forEach((url) => URL.revokeObjectURL(url));
+  photoPreviewUrls = [];
+  const preview = $("photo-preview");
+  preview.innerHTML = "";
+  if (message || !photos.length) {
+    const hint = document.createElement("div");
+    hint.className = "upload-hint";
+    hint.textContent = message || tr("可上传餐食照片帮助 AI 判断搭配");
+    preview.appendChild(hint);
+    return;
+  }
+  photos.forEach((photo, index) => {
+    const item = document.createElement("div");
+    item.className = "photo-item";
+    const image = document.createElement("img");
+    const url = URL.createObjectURL(photo);
+    photoPreviewUrls.push(url);
+    image.src = url;
+    image.alt = language === "en" ? `Food photo ${index + 1}` : `饮食照片 ${index + 1}`;
+    const remove = document.createElement("button");
+    remove.className = "remove-photo";
+    remove.type = "button";
+    remove.textContent = "×";
+    remove.setAttribute("aria-label", language === "en" ? `Remove food photo ${index + 1}` : `删除饮食照片 ${index + 1}`);
+    remove.addEventListener("click", () => {
+      photos.splice(index, 1);
+      if (!photos.length) $("food-photos").value = "";
+      renderPhotoPreviews();
+    });
+    item.append(image, remove);
+    preview.appendChild(item);
+  });
+}
 
 $("food-photos").addEventListener("change", (event) => {
   const selected = Array.from(event.target.files || []);
@@ -171,11 +208,11 @@ $("food-photos").addEventListener("change", (event) => {
   if (selected.length > 4 || selected.some((photo) => !supported.has(photo.type) || photo.size > 4 * 1024 * 1024)) {
     photos = [];
     event.target.value = "";
-    $("photo-preview").innerHTML = `<div class="upload-hint">${language === "en" ? "Choose up to 4 JPEG, PNG, or WebP images, no more than 4 MB each." : "最多选择 4 张 JPEG、PNG 或 WebP 图片，每张不超过 4 MB。"}</div>`;
+    renderPhotoPreviews(language === "en" ? "Choose up to 4 JPEG, PNG, or WebP images, no more than 4 MB each." : "最多选择 4 张 JPEG、PNG 或 WebP 图片，每张不超过 4 MB。");
     return;
   }
   photos = selected;
-  $("photo-preview").innerHTML = photos.length ? photos.map((photo) => `<img src="${URL.createObjectURL(photo)}" alt="饮食照片" />`).join("") : '<div class="upload-hint">可上传餐食照片帮助 AI 判断搭配</div>';
+  renderPhotoPreviews();
 });
 
 const fileToDataUrl = (file) => new Promise((resolve, reject) => {

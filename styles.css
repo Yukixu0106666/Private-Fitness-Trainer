@@ -146,6 +146,26 @@ input[type="file"] { padding: 8px; }
 .task-check:has(input:checked) span { color: var(--green-dark); text-decoration: line-through; text-decoration-color: #9fbaa8; }
 .photo-preview { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 9px; min-height: 27px; }
 .photo-preview img { border-radius: 9px; height: 76px; object-fit: cover; width: 76px; }
+.photo-item { position: relative; }
+.remove-photo {
+  align-items: center;
+  background: rgba(23, 34, 28, .82);
+  border: 2px solid #fff;
+  border-radius: 50%;
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  font-size: 16px;
+  height: 24px;
+  justify-content: center;
+  line-height: 1;
+  padding: 0 0 2px;
+  position: absolute;
+  right: -6px;
+  top: -6px;
+  width: 24px;
+}
+.remove-photo:hover, .remove-photo:focus-visible { background: #a64d3d; outline: 2px solid rgba(166, 77, 61, .22); }
 .upload-hint, .muted { color: var(--muted); font-size: 13px; }
 
 .primary-button {
