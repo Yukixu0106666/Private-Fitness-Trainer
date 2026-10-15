@@ -201,6 +201,12 @@ input[type="file"] { padding: 8px; }
 .score-card strong { display: block; margin-bottom: 3px; }
 .score-card p { color: #cbd5ce; font-size: 12px; line-height: 1.5; margin: 0; }
 .plan-intro { background: var(--mint); border: 1px solid var(--mint-strong); border-radius: 13px; line-height: 1.7; margin-bottom: 8px; padding: 15px 16px; }
+.safety-alert { background: #fff7ed; border: 1px solid #f1c995; border-radius: 14px; color: #6f431c; padding: 20px; }
+.safety-alert.emergency { background: #fff0ec; border-color: #e9a69a; color: #7d3027; }
+.safety-alert .safety-label { display: block; font-size: 11px; font-weight: 800; letter-spacing: .08em; margin-bottom: 10px; text-transform: uppercase; }
+.safety-alert strong { color: inherit; display: block; font-size: 19px; margin-bottom: 7px; }
+.safety-alert p, .safety-alert li { color: inherit; line-height: 1.7; }
+.safety-alert ul { margin: 14px 0 0; padding-left: 20px; }
 .plan-section { border-bottom: 1px solid var(--line); padding: 17px 0; }
 .plan-section:last-child { border-bottom: 0; }
 .plan-section h3 { margin: 0 0 8px; }

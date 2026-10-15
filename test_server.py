@@ -1,3 +1,4 @@
+import io
 import json
 import os
 import tempfile
@@ -258,6 +259,89 @@ class FactValidationTests(unittest.TestCase):
         self.assertIsNone(validated["previousDayEvaluation"]["score"])
         self.assertEqual(validated["previousDayEvaluation"]["date"], "")
         self.assertIn("cleared_unverified_previous_day_score", validation["adjustments"])
+
+    def test_health_safety_gate_detects_emergency_symptoms(self):
+        alert = server.detect_health_red_flags({
+            "phase": "morning", "date": "2026-09-22",
+            "notes": "运动时突然胸痛，而且呼吸困难",
+        })
+        self.assertEqual(alert["level"], "emergency")
+        self.assertIn("chest_symptoms", alert["categories"])
+        self.assertIn("breathing_difficulty", alert["categories"])
+
+    def test_health_safety_gate_detects_medical_attention_symptoms(self):
+        bowel_alert = server.detect_health_red_flags({
+            "phase": "evening", "bowelSymptoms": "pain",
+        })
+        joint_alert = server.detect_health_red_flags({
+            "phase": "midday", "notes": "膝盖突发剧烈疼痛，还有明显肿胀",
+        })
+        self.assertEqual(bowel_alert["level"], "medical_attention")
+        self.assertIn("gastrointestinal_symptom", bowel_alert["categories"])
+        self.assertIn("severe_joint_pain_with_swelling", joint_alert["categories"])
+
+    def test_health_safety_gate_ignores_negation_and_routine_soreness(self):
+        self.assertIsNone(server.detect_health_red_flags({
+            "phase": "morning",
+            "notes": "没有胸痛，只是昨天训练后轻微肌肉酸痛",
+        }))
+        self.assertIsNone(server.detect_health_red_flags({
+            "phase": "morning", "notes": "No chest pain, only mild muscle soreness.",
+        }))
+
+    def test_health_safety_response_is_structured_and_bilingual(self):
+        alert = {"level": "emergency", "categories": ["fainting"]}
+        chinese = server.health_safety_response(alert, "zh")
+        english = server.health_safety_response(alert, "en")
+        self.assertEqual(chinese["safetyAlert"]["level"], "emergency")
+        self.assertGreaterEqual(len(chinese["safetyAlert"]["actions"]), 3)
+        self.assertIn("Stop exercising", english["title"])
+
+
+class HealthSafetyHttpTests(unittest.TestCase):
+    def test_red_flag_is_saved_and_bypasses_model(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(server, "DB_PATH", os.path.join(directory, "fitness.db")):
+            server.init_db()
+            with server.db() as (connection, placeholder):
+                cursor = server.query(
+                    connection,
+                    f"INSERT INTO users (email,password_hash,created_at) VALUES ({placeholder},{placeholder},{placeholder})",
+                    ("safety@example.com", "hash", "now"),
+                )
+                user_id = cursor.lastrowid
+
+            body = json.dumps({
+                "language": "zh",
+                "checkIn": {
+                    "phase": "morning", "date": "2026-09-22",
+                    "notes": "运动时突然胸痛",
+                },
+            }).encode()
+            handler = object.__new__(server.Handler)
+            handler.path = "/api/coach"
+            handler.headers = {
+                "Content-Type": "application/json",
+                "Content-Length": str(len(body)),
+            }
+            handler.rfile = io.BytesIO(body)
+            captured = {}
+
+            def capture(status, payload, **_kwargs):
+                captured.update({"status": status, "payload": payload})
+
+            with patch.object(handler, "current_user", return_value={"id": user_id}), \
+                    patch.object(handler, "send_json", side_effect=capture), \
+                    patch.object(server, "call_model") as call_model:
+                handler.do_POST()
+                call_model.assert_not_called()
+
+            result = captured["payload"]
+            self.assertEqual(captured["status"], 200)
+            self.assertTrue(result["agent"]["safetyInterception"])
+            self.assertEqual(result["plan"]["safetyAlert"]["level"], "emergency")
+            outputs = server.coach_outputs(user_id, "2026-09-22")
+            self.assertEqual(outputs[0]["model"], "deterministic-safety-gate")
 
 
 class RetrievalAndObservabilityTests(unittest.TestCase):

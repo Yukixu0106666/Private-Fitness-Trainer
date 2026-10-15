@@ -34,6 +34,42 @@ TEXT_LIMIT = 2000
 _rate_events = {}
 _rate_lock = threading.Lock()
 
+HEALTH_RED_FLAG_PATTERNS = {
+    "chest_symptoms": [
+        r"胸(?:痛|疼|闷|紧)", r"胸部(?:疼痛|痛|闷|紧|压迫感)", r"心前区(?:痛|疼)",
+        r"\bchest\s+(?:pain|tightness|pressure|discomfort)\b", r"\bpain (?:in|across) (?:my |the )?chest\b",
+    ],
+    "breathing_difficulty": [
+        r"呼吸(?:困难|急促|不上来)", r"喘不过气", r"严重气短",
+        r"\b(?:difficulty breathing|shortness of breath|breathless|cannot breathe|can't breathe|gasping|choking)\b",
+    ],
+    "fainting": [
+        r"晕厥", r"昏厥", r"失去意识", r"晕倒",
+        r"\b(?:fainted|fainting|blackout|blacked out|lost consciousness|passed out)\b",
+    ],
+    "heavy_bleeding": [
+        r"大量出血", r"出血不止", r"止不住血", r"大血块",
+        r"\b(?:heavy bleeding|bleeding (?:that )?(?:will not|won't) stop|large blood clots)\b",
+    ],
+    "gastrointestinal_bleeding": [
+        r"便血", r"血便", r"大便(?:带血|有血)", r"黑便", r"柏油样便",
+        r"\b(?:blood in (?:my )?(?:stool|poo)|bloody (?:stool|diarrhea|diarrhoea)|rectal bleeding|black (?:stool|poo)|tarry (?:stool|poo))\b",
+    ],
+    "cannot_bear_weight": [
+        r"无法负重", r"不能负重", r"无法着地", r"不能着地",
+        r"\b(?:cannot|can't|unable to) (?:bear|put) weight\b",
+    ],
+    "joint_deformity": [
+        r"关节(?:脱位|变形|错位)", r"骨折",
+        r"\b(?:dislocated joint|joint (?:is |looks )?out of (?:place|position)|broken bone|fracture)\b",
+    ],
+}
+
+NEGATION_PATTERN = re.compile(
+    r"(?:没有|并无|否认|不是|无|没|\bno\b|\bnot\b|\bwithout\b|\bden(?:y|ies|ied)\b)\s*.{0,12}$",
+    re.IGNORECASE,
+)
+
 
 def allowed_origins():
     configured = os.environ.get("ALLOWED_ORIGINS", "http://localhost:8000,http://127.0.0.1:8000")
@@ -118,6 +154,117 @@ def validate_images(images):
             raise ValueError("餐食照片格式仅支持 JPEG、PNG 或 WebP")
         if len(image) > 6 * 1024 * 1024:
             raise ValueError("单张餐食照片过大")
+
+
+def _text_values(value):
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from _text_values(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _text_values(item)
+
+
+def _has_non_negated_match(text, pattern):
+    for match in re.finditer(pattern, text, re.IGNORECASE):
+        prefix = text[max(0, match.start() - 20):match.start()]
+        if not NEGATION_PATTERN.search(prefix):
+            return True
+    return False
+
+
+def detect_health_red_flags(check_in):
+    """Return deterministic safety signals found in the current check-in only."""
+    if not isinstance(check_in, dict):
+        return None
+    matches = []
+    texts = [text.strip().lower() for text in _text_values(check_in) if text.strip()]
+    for category, patterns in HEALTH_RED_FLAG_PATTERNS.items():
+        if any(_has_non_negated_match(text, pattern) for text in texts for pattern in patterns):
+            matches.append(category)
+
+    # The UI value represents the explicit "pain / bleeding" bowel symptom choice.
+    if check_in.get("bowelSymptoms") == "pain" and "gastrointestinal_symptom" not in matches:
+        matches.append("gastrointestinal_symptom")
+
+    severe_joint_pain = any(
+        _has_non_negated_match(text, pattern)
+        for text in texts
+        for pattern in (
+            r"(?:严重|剧烈|突发).{0,6}(?:关节|膝|踝|肩|腕)?.{0,3}(?:痛|疼)",
+            r"(?:关节|膝盖|脚踝|肩膀|手腕).{0,6}(?:严重|剧烈|突发).{0,3}(?:痛|疼)",
+            r"\bsevere (?:joint )?pain\b",
+        )
+    )
+    joint_swelling = any(
+        _has_non_negated_match(text, pattern)
+        for text in texts
+        for pattern in (r"(?:肿胀|红肿)", r"\b(?:joint swelling|swollen joint)\b")
+    )
+    if severe_joint_pain and joint_swelling:
+        matches.append("severe_joint_pain_with_swelling")
+
+    matches = list(dict.fromkeys(matches))
+    if not matches:
+        return None
+    emergency_categories = {"chest_symptoms", "breathing_difficulty", "fainting", "heavy_bleeding"}
+    level = "emergency" if emergency_categories.intersection(matches) else "medical_attention"
+    return {"level": level, "categories": matches}
+
+
+def health_safety_response(alert, language="zh"):
+    english = language == "en"
+    if alert["level"] == "emergency":
+        title = "Stop exercising and get urgent help" if english else "请立即停止训练"
+        summary = (
+            "Your check-in contains symptoms that may need urgent medical assessment. "
+            "The coach will not generate workout or nutrition advice."
+            if english else
+            "你记录的症状可能需要紧急医疗评估，教练不会继续生成训练或饮食建议。"
+        )
+        actions = [
+            "Stop exercising now and rest." if english else "立即停止运动并休息。",
+            (
+                "If the symptom is happening now or persists, contact your local emergency service or go to an emergency department now; do not drive yourself."
+                if english else
+                "如果症状正在发生或持续，请立即联系当地急救服务或前往急诊；不要自行驾车。"
+            ),
+            (
+                "Do not resume training until a qualified medical professional says it is safe."
+                if english else "在合格医疗专业人员确认安全前，不要恢复训练。"
+            ),
+        ]
+    else:
+        title = "Pause training and seek medical advice" if english else "今天先暂停训练"
+        summary = (
+            "Your check-in contains a symptom that should be assessed by a medical professional. "
+            "The coach will not generate routine workout advice."
+            if english else
+            "你记录了需要由医疗专业人员评估的症状，教练不会继续生成常规训练建议。"
+        )
+        actions = [
+            "Pause training today." if english else "今天暂停训练。",
+            (
+                "Contact a doctor or other qualified medical professional promptly for assessment."
+                if english else "请尽快联系医生或其他合格医疗专业人员进行评估。"
+            ),
+            (
+                "If you develop chest pain, difficulty breathing, fainting, or heavy or nonstop bleeding, contact your local emergency service immediately."
+                if english else
+                "如果出现胸痛、呼吸困难、晕厥、大量或持续出血，请立即联系当地急救服务。"
+            ),
+        ]
+    return {
+        "title": title,
+        "summary": summary,
+        "safetyAlert": {
+            "level": alert["level"],
+            "categories": alert["categories"],
+            "actions": actions,
+        },
+    }
 
 
 def env_float(name):
@@ -1404,6 +1551,54 @@ class Handler(SimpleHTTPRequestHandler):
                 active_trace = TraceRecorder(user["id"], date, phase)
                 with active_trace.span("check_in.persist"):
                     persist_check_in(user["id"], check_in)
+                safety_started = time.perf_counter()
+                safety_alert = detect_health_red_flags(check_in)
+                active_trace.event("safety.health_red_flags", safety_started, attributes={
+                    "intercepted": bool(safety_alert),
+                    "level": safety_alert.get("level") if safety_alert else None,
+                    "categories": safety_alert.get("categories", []) if safety_alert else [],
+                })
+                if safety_alert:
+                    plan = health_safety_response(safety_alert, body.get("language"))
+                    provenance = {
+                        "dataStatus": "safety_intercepted",
+                        "sources": [{"id": f"record:{date}", "type": "daily_record", "date": date}],
+                        "missingData": [],
+                    }
+                    agent_status = {
+                        "forcedFinish": False,
+                        "safetyInterception": True,
+                        "reason": "health_red_flag",
+                        "model": "deterministic-safety-gate",
+                        "toolSources": [],
+                    }
+                    validation = {
+                        "passed": True,
+                        "adjustments": ["deterministic_health_safety_interception"],
+                    }
+                    metadata = {
+                        **provenance,
+                        "agent": agent_status,
+                        "validation": validation,
+                        "optionalToolsUsed": [],
+                        "safetyGate": safety_alert,
+                    }
+                    with active_trace.span("coach_output.persist"):
+                        save_coach_output(
+                            user["id"], date, phase, plan, metadata,
+                            agent_status["model"],
+                        )
+                    active_trace.model = agent_status["model"]
+                    active_trace.finish("ok")
+                    observability = active_trace.summary()
+                    safe_persist_trace(active_trace)
+                    active_trace = None
+                    self.send_json(200, {
+                        "plan": plan, "toolsUsed": [], "agent": agent_status,
+                        "provenance": provenance, "validation": validation,
+                        "observability": observability,
+                    })
+                    return
                 with active_trace.span("memory.build"):
                     memory, provenance = build_memory_context(user["id"], check_in, trace=active_trace)
                 with active_trace.span("agent.run"):

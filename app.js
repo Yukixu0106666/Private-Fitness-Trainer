@@ -231,7 +231,11 @@ function renderCoachResponse(response, phase) {
   $("empty-plan").classList.add("hidden");
   $("plan-content").classList.remove("hidden");
   $("plan-title").textContent = response.title || (phase === "morning" ? "今日计划" : phase === "midday" ? "拉伸建议" : "今日复盘");
-  if (phase === "morning") {
+  if (response.safetyAlert) {
+    const urgent = response.safetyAlert.level === "emergency";
+    const heading = language === "en" ? (urgent ? "Urgent medical attention" : "Medical assessment recommended") : (urgent ? "请立即寻求医疗帮助" : "建议尽快进行医疗评估");
+    $("plan-content").innerHTML = `<div class="safety-alert ${urgent ? "emergency" : "medical-attention"}"><span class="safety-label">${escapeHtml(heading)}</span><strong>${escapeHtml(response.title)}</strong><p>${escapeHtml(response.summary)}</p>${list(response.safetyAlert.actions)}</div>`;
+  } else if (phase === "morning") {
     const evaluation = response.previousDayEvaluation;
     const hasScore = evaluation && evaluation.score !== null && evaluation.score !== "" && Number.isFinite(Number(evaluation.score));
     const score = hasScore ? `<div class="score-card"><div class="score-number">${escapeHtml(evaluation.score)}<small>/100</small></div><div><strong>昨天表现</strong><p>${escapeHtml(evaluation.summary)}</p></div></div>` : "";
@@ -380,9 +384,10 @@ async function runPhase({ phase, button, checkIn, images = [] }) {
     await loadRecords();
     const usedTools = Array.isArray(result.toolsUsed) && result.toolsUsed.length;
     const forcedFinish = result.agent?.forcedFinish;
+    const safetyInterception = result.agent?.safetyInterception;
     const observed = result.observability;
     const telemetry = observed ? ` · ${(Number(observed.durationMs) / 1000).toFixed(1)}s${observed.estimatedCostUsd === null ? "" : ` · $${Number(observed.estimatedCostUsd).toFixed(4)}`}` : "";
-    renderCoachResponse(response, phase); renderProvenance(result.provenance); setStatus((language === "en" ? `AI Coach · ${forcedFinish ? "Limited-data fallback" : usedTools ? "Extra history read" : "Memory loaded"}` : `AI 教练 · ${forcedFinish ? "已降级生成" : usedTools ? "已补充读取历史" : "记忆已加载"}`) + telemetry);
+    renderCoachResponse(response, phase); renderProvenance(result.provenance); setStatus((language === "en" ? `AI Coach · ${safetyInterception ? "Health safety alert" : forcedFinish ? "Limited-data fallback" : usedTools ? "Extra history read" : "Memory loaded"}` : `AI 教练 · ${safetyInterception ? "健康安全提醒" : forcedFinish ? "已降级生成" : usedTools ? "已补充读取历史" : "记忆已加载"}`) + telemetry);
   } catch (error) {
     setStatus(language === "en" ? "AI service unavailable" : "AI 服务未连接", "error"); $("empty-plan").classList.add("hidden"); $("plan-content").classList.remove("hidden");
     const title = checkInSaved ? (language === "en" ? "Check-in saved, but AI guidance failed" : "打卡已保存，但 AI 建议生成失败") : (language === "en" ? "This check-in was not saved" : "这次没有保存");

@@ -36,6 +36,8 @@ Legacy mixed records are migrated to this layered structure at startup. The UI s
 
 Model output goes through server-side structure and factual validation before it is saved. For example, when no previous-day record exists, the server forces the previous-day score to remain empty. A score can only refer to the previous day actually retrieved, and it must be between 0 and 100. Structurally incomplete answers are not written to the AI output layer.
 
+Before requesting the model, the server also applies a deterministic health red-flag gate to the current check-in. Chest pain, breathing difficulty, fainting, or heavy nonstop bleeding trigger an emergency message; gastrointestinal bleeding, severe joint pain with swelling, inability to bear weight, and similar signals pause routine coaching and recommend prompt medical assessment. When this gate is triggered, the check-in and safety message are saved for review, but no language model is called.
+
 Every submission saves the raw check-in before requesting AI guidance, so a temporary model or tool failure does not lose user data. Tool errors are returned to the model as structured results and the model receives one opportunity to correct the call. The server stops tool use after a repeated identical call, two tool errors, or four tool-call rounds, then requires a conservative answer that clearly states the information limitation.
 
 ## Behavioural evaluation
