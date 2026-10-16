@@ -344,6 +344,89 @@ class HealthSafetyHttpTests(unittest.TestCase):
             self.assertEqual(outputs[0]["model"], "deterministic-safety-gate")
 
 
+class DataControlTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.database_patch = patch.object(
+            server, "DB_PATH", os.path.join(self.directory.name, "fitness.db")
+        )
+        self.database_patch.start()
+        self.addCleanup(self.database_patch.stop)
+        server.init_db()
+        with server.db() as (connection, placeholder):
+            cursor = server.query(
+                connection,
+                f"INSERT INTO users (email,password_hash,created_at) VALUES ({placeholder},{placeholder},{placeholder})",
+                ("owner@example.com", server.hash_password("correct-password"), "now"),
+            )
+            self.user_id = cursor.lastrowid
+
+    def test_export_contains_profile_facts_and_ai_outputs(self):
+        server.save_record(self.user_id, {
+            "date": "2026-09-22", "goal": "health", "morning": {"sleep": "7"},
+        })
+        server.save_coach_output(
+            self.user_id, "2026-09-22", "morning",
+            {"title": "计划"}, {"sources": []}, "test-model",
+        )
+        exported = server.export_user_data({"id": self.user_id, "email": "owner@example.com"})
+        self.assertEqual(exported["format"], "fitness-coach-export-v1")
+        self.assertEqual(exported["account"]["email"], "owner@example.com")
+        self.assertEqual(exported["profile"]["confirmed"]["goal"], "health")
+        self.assertEqual(exported["records"][0]["plan"]["title"], "计划")
+
+    def test_delete_record_removes_fact_output_and_vector_memory(self):
+        server.save_record(self.user_id, {
+            "date": "2026-09-22", "morning": {"sleep": "7"},
+        })
+        server.save_coach_output(
+            self.user_id, "2026-09-22", "morning",
+            {"title": "计划"}, {"sources": []}, "test-model",
+        )
+        trace = server.TraceRecorder(self.user_id, "2026-09-22", "morning")
+        trace.finish("ok")
+        server.persist_trace(trace)
+        with server.db() as (connection, _):
+            server.query(connection, "CREATE TABLE fitness_memory_chunks (user_id INTEGER, date TEXT)")
+            server.query(connection, "INSERT INTO fitness_memory_chunks VALUES (?,?)", (self.user_id, "2026-09-22"))
+
+        server.delete_record(self.user_id, "2026-09-22")
+
+        self.assertEqual(server.fact_records(self.user_id), [])
+        self.assertEqual(server.coach_outputs(self.user_id), [])
+        self.assertEqual(server.recent_traces(self.user_id), [])
+        with server.db() as (connection, _):
+            remaining = server.query(connection, "SELECT COUNT(*) FROM fitness_memory_chunks").fetchone()[0]
+        self.assertEqual(remaining, 0)
+
+    def test_clear_profile_keeps_daily_records(self):
+        server.save_record(self.user_id, {
+            "date": "2026-09-22", "goal": "fitness", "morning": {"sleep": "7"},
+        })
+        server.clear_profile(self.user_id)
+        self.assertEqual(server.load_profile(self.user_id)["confirmed"], {})
+        self.assertEqual(len(server.fact_records(self.user_id)), 1)
+
+    def test_delete_account_requires_password_and_removes_all_layers(self):
+        server.save_record(self.user_id, {
+            "date": "2026-09-22", "morning": {"sleep": "7"},
+        })
+        server.create_session(self.user_id)
+        with self.assertRaisesRegex(ValueError, "密码不正确"):
+            server.delete_account(self.user_id, "wrong-password")
+        self.assertEqual(len(server.fact_records(self.user_id)), 1)
+
+        server.delete_account(self.user_id, "correct-password")
+
+        with server.db() as (connection, _):
+            counts = {
+                table: server.query(connection, f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                for table in ("users", "sessions", "records", "user_profiles", "coach_outputs", "request_traces")
+            }
+        self.assertEqual(set(counts.values()), {0})
+
+
 class RetrievalAndObservabilityTests(unittest.TestCase):
     def test_reranker_combines_similarity_recency_and_keyword_overlap(self):
         candidates = [

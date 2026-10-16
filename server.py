@@ -632,6 +632,82 @@ def load_profile(user_id):
     return {"confirmed": json.loads(row[0]), "updatedAt": row[1]}
 
 
+def export_user_data(user):
+    return {
+        "format": "fitness-coach-export-v1",
+        "exportedAt": now().isoformat(),
+        "account": {"email": user["email"]},
+        "profile": load_profile(user["id"]),
+        "records": list_records(user["id"]),
+    }
+
+
+def _table_exists(connection, table_name):
+    if is_postgres():
+        return query(connection, "SELECT to_regclass(%s)", (table_name,)).fetchone()[0] is not None
+    return query(
+        connection,
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+        (table_name,),
+    ).fetchone() is not None
+
+
+def delete_record(user_id, date):
+    validate_date(date)
+    with db() as (connection, placeholder):
+        existing = query(
+            connection,
+            f"SELECT 1 FROM records WHERE user_id={placeholder} AND date={placeholder}",
+            (user_id, date),
+        ).fetchone()
+        if not existing:
+            raise ValueError("找不到这一天的记录")
+        query(
+            connection,
+            f"DELETE FROM coach_outputs WHERE user_id={placeholder} AND date={placeholder}",
+            (user_id, date),
+        )
+        query(
+            connection,
+            f"DELETE FROM request_traces WHERE user_id={placeholder} AND date={placeholder}",
+            (user_id, date),
+        )
+        query(
+            connection,
+            f"DELETE FROM records WHERE user_id={placeholder} AND date={placeholder}",
+            (user_id, date),
+        )
+        if _table_exists(connection, "fitness_memory_chunks"):
+            query(
+                connection,
+                f"DELETE FROM fitness_memory_chunks WHERE user_id={placeholder} AND date={placeholder}",
+                (user_id, date),
+            )
+
+
+def clear_profile(user_id):
+    with db() as (connection, placeholder):
+        query(connection, f"DELETE FROM user_profiles WHERE user_id={placeholder}", (user_id,))
+
+
+def delete_account(user_id, password):
+    if not isinstance(password, str) or not password:
+        raise ValueError("请输入密码确认删除账号")
+    with db() as (connection, placeholder):
+        row = query(
+            connection,
+            f"SELECT password_hash FROM users WHERE id={placeholder}",
+            (user_id,),
+        ).fetchone()
+        if not row or not verify_password(password, row[0]):
+            raise ValueError("密码不正确，账号未删除")
+        for table in ("request_traces", "coach_outputs", "records", "user_profiles", "sessions"):
+            query(connection, f"DELETE FROM {table} WHERE user_id={placeholder}", (user_id,))
+        if _table_exists(connection, "fitness_memory_chunks"):
+            query(connection, f"DELETE FROM fitness_memory_chunks WHERE user_id={placeholder}", (user_id,))
+        query(connection, f"DELETE FROM users WHERE id={placeholder}", (user_id,))
+
+
 def update_profile(user_id, values, allow_clear=False):
     supported = ("height", "goal", "equipment", "dietaryPreferences", "constraints")
     supplied = {key: values.get(key) for key in supported if key in values}
@@ -1440,7 +1516,7 @@ class Handler(SimpleHTTPRequestHandler):
         return self.path.split("?", 1)[0]
 
     def end_headers(self):
-        if self.request_path() in ("/", "/index.html", "/app.js", "/styles.css"):
+        if self.request_path().startswith("/api/") or self.request_path() in ("/", "/index.html", "/app.js", "/styles.css"):
             self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
             self.send_header("Pragma", "no-cache")
             self.send_header("Expires", "0")
@@ -1471,7 +1547,7 @@ class Handler(SimpleHTTPRequestHandler):
         params = parse_qs(urlparse(self.path).query)
         if path == "/api/me":
             self.send_json(200, {"user": self.current_user()})
-        elif path in ("/api/records", "/api/metrics", "/api/traces"):
+        elif path in ("/api/records", "/api/metrics", "/api/traces", "/api/export"):
             user = self.current_user()
             if not user:
                 self.send_json(401, {"error": "请先登录"})
@@ -1479,6 +1555,11 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_json(200, trace_metrics(user["id"], params.get("limit", ["100"])[0]))
             elif path == "/api/traces":
                 self.send_json(200, {"traces": recent_traces(user["id"], params.get("limit", ["20"])[0])})
+            elif path == "/api/export":
+                filename = f"fitness-coach-export-{now().date().isoformat()}.json"
+                self.send_json(200, export_user_data(user), extra_headers={
+                    "Content-Disposition": f'attachment; filename="{filename}"',
+                })
             else:
                 self.send_json(200, {"records": list_records(user["id"]), "profile": load_profile(user["id"])})
         else:
@@ -1487,7 +1568,10 @@ class Handler(SimpleHTTPRequestHandler):
     def do_POST(self):
         path = self.request_path()
         active_trace = None
-        if path not in ("/api/register", "/api/login", "/api/logout", "/api/coach", "/api/records"):
+        if path not in (
+            "/api/register", "/api/login", "/api/logout", "/api/coach", "/api/records",
+            "/api/records/delete", "/api/profile/clear", "/api/account/delete",
+        ):
             self.send_error(404)
             return
         if self.headers.get("Origin") and not self.origin():
@@ -1539,6 +1623,15 @@ class Handler(SimpleHTTPRequestHandler):
             if path == "/api/records":
                 save_record(user["id"], body)
                 self.send_json(201, {"ok": True, "profile": load_profile(user["id"])})
+            elif path == "/api/records/delete":
+                delete_record(user["id"], body.get("date"))
+                self.send_json(200, {"ok": True})
+            elif path == "/api/profile/clear":
+                clear_profile(user["id"])
+                self.send_json(200, {"ok": True, "profile": load_profile(user["id"])})
+            elif path == "/api/account/delete":
+                delete_account(user["id"], body.get("password"))
+                self.send_json(200, {"ok": True}, clear_cookie=True)
             else:
                 allowed, retry_after = rate_limit(("coach", user["id"]), COACH_RATE_LIMIT, COACH_RATE_WINDOW)
                 if not allowed:

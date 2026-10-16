@@ -223,7 +223,24 @@ input[type="file"] { padding: 8px; }
 .history-list { display: grid; gap: 0; }
 .history-item { align-items: center; border-top: 1px solid var(--line); display: flex; gap: 18px; padding: 14px 0 4px; }
 .history-date { color: var(--green); flex: 0 0 100px; font-size: 14px; font-weight: 700; }
-.history-summary { color: var(--muted); font-size: 13px; }
+.history-summary { color: var(--muted); flex: 1 1 auto; font-size: 13px; }
+.delete-record { background: transparent; border: 0; color: #9b645d; cursor: pointer; flex: 0 0 auto; font-size: 12px; padding: 5px; }
+.delete-record:hover { color: #8b2f25; }
+.data-controls { border-top: 1px solid var(--line); margin-top: 22px; padding-top: 18px; }
+.data-controls summary { color: var(--green-dark); cursor: pointer; font-size: 13px; font-weight: 700; }
+.data-controls > .muted { margin: 12px 0; }
+.data-actions { display: flex; flex-wrap: wrap; gap: 9px; }
+.secondary-button, .danger-button { border-radius: 9px; cursor: pointer; font-size: 12px; font-weight: 700; padding: 9px 12px; }
+.secondary-button { background: #fff; border: 1px solid var(--line); color: var(--green-dark); }
+.secondary-button:hover { background: var(--soft); }
+.danger-text { color: #8b2f25; }
+.delete-account-box { background: #fff7f5; border: 1px solid #efd0ca; border-radius: 11px; margin-top: 17px; padding: 15px; }
+.delete-account-box > strong { color: #7d3027; display: block; margin-bottom: 5px; }
+.delete-account-box .field { margin: 13px 0 10px; max-width: 360px; }
+.danger-button { background: #9c3f34; border: 0; color: #fff; }
+.danger-button:hover { background: #7d3027; }
+.data-action-status { color: var(--muted); font-size: 12px; margin: 12px 0 0; min-height: 19px; }
+.data-action-status.error { color: #a64d3d; }
 footer { margin-top: 24px; text-align: center; }
 
 @media (max-width: 760px) {
@@ -253,4 +270,5 @@ footer { margin-top: 24px; text-align: center; }
   .radio-field label { display: flex; margin-right: 0; }
   .history-item { align-items: flex-start; display: block; }
   .history-date { margin-bottom: 3px; }
+  .delete-record { margin-top: 4px; padding-left: 0; }
 }

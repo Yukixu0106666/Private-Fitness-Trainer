@@ -128,6 +128,21 @@
         <div id="history-list" class="history-list">
           <p class="muted">完成第一次打卡后，这里会显示你的记录。</p>
         </div>
+        <details class="data-controls">
+          <summary>数据与账号管理</summary>
+          <p class="muted">你可以导出所有打卡、长期画像和 AI 建议。</p>
+          <div class="data-actions">
+            <button id="export-data" class="secondary-button" type="button">导出个人数据</button>
+            <button id="clear-profile" class="secondary-button danger-text" type="button">清空长期记忆</button>
+          </div>
+          <div class="delete-account-box">
+            <strong>永久删除账号</strong>
+            <p class="muted">这会删除所有打卡、AI 建议、请求追踪和向量记忆，且无法恢复。</p>
+            <label class="field"><span>输入密码确认</span><input id="delete-account-password" type="password" autocomplete="current-password" /></label>
+            <button id="delete-account" class="danger-button" type="button">永久删除账号</button>
+          </div>
+          <p id="data-action-status" class="data-action-status" aria-live="polite"></p>
+        </details>
       </section>
 
       <footer id="app-footer" class="hidden">健康建议不能替代医生或持证教练的诊断。出现疼痛、胸闷、眩晕等症状时请停止训练并寻求专业帮助。</footer>

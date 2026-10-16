@@ -39,7 +39,11 @@ const enText = {
   "健康建议不能替代医生或持证教练的诊断。出现疼痛、胸闷、眩晕等症状时请停止训练并寻求专业帮助。": "Health guidance does not replace a doctor or certified trainer. Stop and seek help for pain, chest tightness, or dizziness.",
   "很好": "Very good", "不错": "Good", "一般": "Average", "较低": "Low", "很差": "Very low", "几乎没有": "Almost none", "轻微": "Slight", "中等": "Moderate", "明显": "Noticeable", "很严重": "Severe",
   "很轻松": "Very easy", "适中": "Moderate", "较累": "Hard", "非常累": "Very hard", "分钟": "min", "个": "reps", "已保存": "Saved",
-  "长期记忆设置": "Long-term memory", "由你确认后保存": "saved only after your confirmation", "可用器械": "Available equipment", "饮食偏好或限制": "Dietary preferences or restrictions", "长期身体限制": "Long-term physical constraints", "只填写希望教练长期记住的信息": "Only enter information you want the coach to remember"
+  "长期记忆设置": "Long-term memory", "由你确认后保存": "saved only after your confirmation", "可用器械": "Available equipment", "饮食偏好或限制": "Dietary preferences or restrictions", "长期身体限制": "Long-term physical constraints", "只填写希望教练长期记住的信息": "Only enter information you want the coach to remember",
+  "数据与账号管理": "Data and account management", "你可以导出所有打卡、长期画像和 AI 建议。": "Export all check-ins, your long-term profile, and AI guidance.",
+  "导出个人数据": "Export personal data", "清空长期记忆": "Clear long-term memory", "永久删除账号": "Permanently delete account",
+  "这会删除所有打卡、AI 建议、请求追踪和向量记忆，且无法恢复。": "This deletes every check-in, AI response, request trace, and vector memory and cannot be undone.",
+  "输入密码确认": "Enter your password to confirm"
 };
 const originalText = new WeakMap();
 const originalPlaceholder = new WeakMap();
@@ -149,6 +153,62 @@ $("logout-button").addEventListener("click", async () => {
   showApp(null);
 });
 
+function setDataActionStatus(message, error = false) {
+  $("data-action-status").textContent = message;
+  $("data-action-status").classList.toggle("error", error);
+}
+
+$("export-data").addEventListener("click", async () => {
+  setDataActionStatus(language === "en" ? "Preparing export…" : "正在准备导出…");
+  try {
+    const response = await fetch("/api/export", { credentials: "same-origin" });
+    if (!response.ok) {
+      const result = await response.json().catch(() => ({}));
+      throw new Error(result.error || (language === "en" ? "Could not export data" : "无法导出数据"));
+    }
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `fitness-coach-export-${isoDate(new Date())}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    setDataActionStatus(language === "en" ? "Export downloaded." : "个人数据已下载。");
+  } catch (error) { setDataActionStatus(error.message, true); }
+});
+
+$("clear-profile").addEventListener("click", async () => {
+  const confirmed = window.confirm(language === "en" ? "Clear your confirmed long-term profile? Daily records will be kept." : "确定清空已确认的长期记忆吗？每日打卡会保留。");
+  if (!confirmed) return;
+  try {
+    const result = await authRequest("/api/profile/clear", {});
+    profile = result.profile?.confirmed || {};
+    populateForms();
+    setDataActionStatus(language === "en" ? "Long-term memory cleared." : "长期记忆已清空。");
+  } catch (error) { setDataActionStatus(error.message, true); }
+});
+
+$("delete-account").addEventListener("click", async () => {
+  const password = $("delete-account-password").value;
+  if (!password) {
+    setDataActionStatus(language === "en" ? "Enter your password first." : "请先输入密码。", true);
+    return;
+  }
+  const confirmed = window.confirm(language === "en" ? "Permanently delete this account and all its data? This cannot be undone." : "确定永久删除账号及全部数据吗？此操作无法恢复。");
+  if (!confirmed) return;
+  try {
+    await authRequest("/api/account/delete", { password });
+    records = [];
+    profile = {};
+    $("delete-account-password").value = "";
+    renderHistory();
+    showApp(null);
+    setStatus(language === "en" ? "Account deleted" : "账号已删除");
+  } catch (error) { setDataActionStatus(error.message, true); }
+});
+
 function switchPhase(phase, showSavedResponse = true) {
   activePhase = phase;
   document.querySelectorAll(".phase-tab").forEach((tab) => tab.classList.toggle("active", tab.dataset.phase === phase));
@@ -226,6 +286,12 @@ function list(items) {
   return Array.isArray(items) && items.length ? `<ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : "";
 }
 
+function isValidScore(value) {
+  if (value === null || value === undefined || value === "") return false;
+  const score = Number(value);
+  return Number.isFinite(score) && score >= 0 && score <= 100;
+}
+
 function renderCoachResponse(response, phase) {
   if (!response) return showEmptyCoach();
   $("empty-plan").classList.add("hidden");
@@ -237,7 +303,7 @@ function renderCoachResponse(response, phase) {
     $("plan-content").innerHTML = `<div class="safety-alert ${urgent ? "emergency" : "medical-attention"}"><span class="safety-label">${escapeHtml(heading)}</span><strong>${escapeHtml(response.title)}</strong><p>${escapeHtml(response.summary)}</p>${list(response.safetyAlert.actions)}</div>`;
   } else if (phase === "morning") {
     const evaluation = response.previousDayEvaluation;
-    const hasScore = evaluation && evaluation.score !== null && evaluation.score !== "" && Number.isFinite(Number(evaluation.score));
+    const hasScore = evaluation && isValidScore(evaluation.score);
     const score = hasScore ? `<div class="score-card"><div class="score-number">${escapeHtml(evaluation.score)}<small>/100</small></div><div><strong>昨天表现</strong><p>${escapeHtml(evaluation.summary)}</p></div></div>` : "";
     const meals = response.meals || {};
     $("plan-content").innerHTML = `${score}<div class="plan-intro"><strong>${escapeHtml(response.title)}</strong><br />${escapeHtml(response.summary)}</div>
@@ -314,16 +380,40 @@ function populateForms() {
 }
 
 function renderHistory() {
-  $("record-count").textContent = `${records.length} 天记录`;
+  $("record-count").textContent = language === "en" ? `${records.length} days` : `${records.length} 天记录`;
   $("history-list").innerHTML = records.length ? records.slice(0, 14).map((record) => {
     const nextRecord = records.find((item) => priorDate(item.date) === record.date);
     const score = nextRecord?.plan?.previousDayEvaluation?.score;
+    const scoreSummary = isValidScore(score)
+      ? ` · ${language === "en" ? "Next-day score" : "次日评分"} ${escapeHtml(score)}/100`
+      : ` · ${language === "en" ? "Waiting for next-day score" : "等待次日评分"}`;
     const morning = record.morning || record;
     const phases = [record.morning || record.weight, record.midday, record.evening].filter(Boolean).length;
-    return `<div class="history-item"><div class="history-date">${escapeHtml(record.date)}</div><div class="history-summary">${morning.weight ? `${escapeHtml(morning.weight)} kg · ` : ""}${phases}/3 阶段已记录${score !== undefined ? ` · 次日评分 ${escapeHtml(score)}/100` : " · 等待次日评分"}</div></div>`;
-  }).join("") : '<p class="muted">完成第一次早间打卡后，这里会显示你的记录。</p>';
+    const phaseSummary = language === "en" ? `${phases}/3 phases logged` : `${phases}/3 阶段已记录`;
+    const deleteLabel = language === "en" ? `Delete record for ${record.date}` : `删除 ${record.date} 记录`;
+    return `<div class="history-item"><div class="history-date">${escapeHtml(record.date)}</div><div class="history-summary">${morning.weight ? `${escapeHtml(morning.weight)} kg · ` : ""}${phaseSummary}${scoreSummary}</div><button class="delete-record" type="button" data-date="${escapeHtml(record.date)}" aria-label="${escapeHtml(deleteLabel)}">${language === "en" ? "Delete" : "删除"}</button></div>`;
+  }).join("") : `<p class="muted">${language === "en" ? "Your records will appear here after your first morning check-in." : "完成第一次早间打卡后，这里会显示你的记录。"}</p>`;
   applyLanguage();
 }
+
+$("history-list").addEventListener("click", async (event) => {
+  const button = event.target.closest(".delete-record");
+  if (!button) return;
+  const date = button.dataset.date;
+  const confirmed = window.confirm(language === "en" ? `Delete all records and AI guidance for ${date}?` : `确定删除 ${date} 的全部打卡和 AI 建议吗？`);
+  if (!confirmed) return;
+  button.disabled = true;
+  try {
+    await authRequest("/api/records/delete", { date });
+    records = records.filter((record) => record.date !== date);
+    renderHistory();
+    populateForms();
+    setDataActionStatus(language === "en" ? `Record for ${date} deleted.` : `${date} 的记录已删除。`);
+  } catch (error) {
+    button.disabled = false;
+    setDataActionStatus(error.message, true);
+  }
+});
 
 function setStatus(text, state = "") {
   $("connection-status").className = `status-pill ${state}`;
