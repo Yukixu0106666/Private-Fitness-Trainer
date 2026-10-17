@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>我的健身教练</title>
-    <link rel="stylesheet" href="styles.css?v=20261017-1" />
+    <link rel="stylesheet" href="styles.css?v=20261017-2" />
   </head>
   <body>
     <main class="app-shell">
@@ -117,6 +117,38 @@
         </aside>
       </section>
 
+      <section class="card progress-card hidden" id="progress-content">
+        <div class="card-heading progress-heading">
+          <div>
+            <p class="section-kicker">YOUR PROGRESS</p>
+            <h2>进度趋势</h2>
+          </div>
+          <div class="range-toggle" role="group" aria-label="进度统计范围">
+            <button type="button" data-days="7">7 天</button>
+            <button class="active" type="button" data-days="14">14 天</button>
+            <button type="button" data-days="30">30 天</button>
+          </div>
+        </div>
+        <div id="progress-empty" class="progress-empty hidden">
+          <strong>完成打卡后，这里会显示你的趋势</strong>
+          <p>连续记录几天，就能看见体重、恢复和训练变化。</p>
+        </div>
+        <div id="progress-dashboard">
+          <div id="progress-metrics" class="progress-metrics"></div>
+          <div class="progress-charts">
+            <article class="trend-panel">
+              <div class="trend-heading"><div><span>体重趋势</span><small>圆点为记录值，线条为移动平均</small></div><strong id="weight-trend-label">—</strong></div>
+              <div id="weight-chart" class="chart-shell"></div>
+            </article>
+            <article class="trend-panel">
+              <div class="trend-heading"><div><span>恢复状态</span><small>睡眠与精力变化</small></div><strong id="recovery-trend-label">—</strong></div>
+              <div id="recovery-chart" class="chart-shell"></div>
+            </article>
+          </div>
+          <div id="progress-insights" class="progress-insights"></div>
+        </div>
+      </section>
+
       <section class="card history-card hidden" id="history-content">
         <div class="card-heading">
           <div>
@@ -147,6 +179,6 @@
 
       <footer id="app-footer" class="hidden">健康建议不能替代医生或持证教练的诊断。出现疼痛、胸闷、眩晕等症状时请停止训练并寻求专业帮助。</footer>
     </main>
-    <script src="app.js?v=20261017-1"></script>
+    <script src="app.js?v=20261017-2"></script>
   </body>
 </html>

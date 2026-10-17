@@ -10,6 +10,7 @@ let photoPreviewUrls = [];
 let records = [];
 let profile = {};
 let registerMode = false;
+let progressDays = 14;
 let activePhase = today.getHours() < 11 ? "morning" : today.getHours() < 18 ? "midday" : "evening";
 let language = localStorage.getItem("fitness-coach-language") || "zh";
 
@@ -43,7 +44,10 @@ const enText = {
   "数据与账号管理": "Data and account management", "你可以导出所有打卡、长期画像和 AI 建议。": "Export all check-ins, your long-term profile, and AI guidance.",
   "导出个人数据": "Export personal data", "清空长期记忆": "Clear long-term memory", "永久删除账号": "Permanently delete account",
   "这会删除所有打卡、AI 建议、请求追踪和向量记忆，且无法恢复。": "This deletes every check-in, AI response, request trace, and vector memory and cannot be undone.",
-  "输入密码确认": "Enter your password to confirm", "可以从早上的计划一键带入，再勾选和修改实际完成量。": "Import the morning plan, then check off and adjust what you completed."
+  "输入密码确认": "Enter your password to confirm", "可以从早上的计划一键带入，再勾选和修改实际完成量。": "Import the morning plan, then check off and adjust what you completed.",
+  "进度趋势": "Progress trends", "体重趋势": "Weight trend", "圆点为记录值，线条为移动平均": "Dots are entries; the line is a moving average",
+  "恢复状态": "Recovery", "睡眠与精力变化": "Sleep and energy trends", "完成打卡后，这里会显示你的趋势": "Your trends will appear after you check in",
+  "连续记录几天，就能看见体重、恢复和训练变化。": "Log a few days to see changes in weight, recovery, and training."
 };
 const originalText = new WeakMap();
 const originalPlaceholder = new WeakMap();
@@ -149,6 +153,7 @@ function showApp(user) {
   $("auth-card").classList.toggle("hidden", !!user);
   $("app-content").classList.toggle("hidden", !user);
   $("history-content").classList.toggle("hidden", !user);
+  $("progress-content").classList.toggle("hidden", !user);
   $("app-footer").classList.toggle("hidden", !user);
   $("logout-button").classList.toggle("hidden", !user);
   if (user) $("auth-user").textContent = user.email;
@@ -185,6 +190,7 @@ $("logout-button").addEventListener("click", async () => {
   records = [];
   profile = {};
   renderHistory();
+  renderProgress();
   showApp(null);
 });
 
@@ -259,6 +265,7 @@ $("language-toggle").addEventListener("click", () => {
   applyLanguage();
   if (photos.length) renderPhotoPreviews();
   renderHistory();
+  renderProgress();
   renderSavedResponse();
 });
 
@@ -455,6 +462,172 @@ function renderHistory() {
   applyLanguage();
 }
 
+function dateNumber(date) {
+  const value = new Date(`${date}T12:00:00`).getTime();
+  return Number.isFinite(value) ? value : null;
+}
+
+function numericValue(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function average(values) {
+  const valid = values.map(numericValue).filter((value) => value !== null);
+  return valid.length ? valid.reduce((sum, value) => sum + value, 0) / valid.length : null;
+}
+
+function phaseCount(record) {
+  return [record.morning || record.weight, record.midday, record.evening].filter(Boolean).length;
+}
+
+function progressRecords(days) {
+  const end = new Date();
+  end.setHours(23, 59, 59, 999);
+  const start = new Date(end);
+  start.setDate(start.getDate() - days + 1);
+  start.setHours(0, 0, 0, 0);
+  return records.filter((record) => {
+    const value = dateNumber(record.date);
+    return value !== null && value >= start.getTime() && value <= end.getTime();
+  }).sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function currentStreak() {
+  const dates = new Set(records.map((record) => record.date));
+  const cursor = new Date();
+  if (!dates.has(isoDate(cursor))) cursor.setDate(cursor.getDate() - 1);
+  let count = 0;
+  while (dates.has(isoDate(cursor))) {
+    count += 1;
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  return count;
+}
+
+function workoutStats(items) {
+  let days = 0;
+  let minutes = 0;
+  items.forEach((record) => {
+    const midday = record.midday || {};
+    const exercises = Array.isArray(midday.exercises) ? midday.exercises : [];
+    const completed = exercises.filter((exercise) => exercise.completed !== false);
+    const recordedMinutes = numericValue(midday.totalDuration);
+    if (completed.length || (recordedMinutes !== null && recordedMinutes > 0)) days += 1;
+    if (recordedMinutes !== null && recordedMinutes > 0) minutes += recordedMinutes;
+  });
+  return { days, minutes: Math.round(minutes) };
+}
+
+function movingAverage(samples, windowSize = 7) {
+  return samples.map((sample, index) => ({
+    ...sample,
+    average: average(samples.slice(Math.max(0, index - windowSize + 1), index + 1).map((item) => item.value)),
+  }));
+}
+
+function lineChart(samples, options = {}) {
+  if (!samples.length) return `<div class="chart-empty">${language === "en" ? "Not enough data yet" : "数据还不够，继续记录几天吧"}</div>`;
+  const width = 520, height = 178, left = 38, right = 14, top = 12, bottom = 28;
+  const plotWidth = width - left - right, plotHeight = height - top - bottom;
+  const chartKeys = options.dotsKey ? [...options.valueKeys, options.dotsKey] : options.valueKeys;
+  const values = samples.flatMap((sample) => chartKeys.map((key) => numericValue(sample[key]))).filter((value) => value !== null);
+  let min = options.min ?? Math.min(...values), max = options.max ?? Math.max(...values);
+  if (min === max) { min -= 1; max += 1; }
+  const padding = options.fixedRange ? 0 : Math.max((max - min) * 0.12, options.minimumPadding || 0.2);
+  min -= padding; max += padding;
+  const firstDate = Math.min(...samples.map((sample) => sample.time));
+  const lastDate = Math.max(...samples.map((sample) => sample.time));
+  const x = (sample, index) => lastDate === firstDate ? left + plotWidth / 2 : left + ((sample.time - firstDate) / (lastDate - firstDate)) * plotWidth;
+  const y = (value) => top + ((max - value) / (max - min)) * plotHeight;
+  const grids = [0, .5, 1].map((ratio) => {
+    const gridY = top + ratio * plotHeight;
+    const label = (max - ratio * (max - min)).toFixed(options.decimals ?? 1);
+    return `<line class="chart-grid" x1="${left}" y1="${gridY}" x2="${width - right}" y2="${gridY}"/><text class="chart-axis-label" x="${left - 5}" y="${gridY + 3}" text-anchor="end">${label}</text>`;
+  }).join("");
+  const paths = options.valueKeys.map((key, keyIndex) => {
+    const points = samples.map((sample, index) => numericValue(sample[key]) !== null ? `${x(sample, index)},${y(numericValue(sample[key]))}` : null).filter(Boolean);
+    return points.length ? `<polyline class="chart-line${keyIndex ? " secondary" : ""}" points="${points.join(" ")}"/>` : "";
+  }).join("");
+  const dots = options.dotsKey ? samples.map((sample, index) => numericValue(sample[options.dotsKey]) !== null ? `<circle class="chart-dot" cx="${x(sample, index)}" cy="${y(numericValue(sample[options.dotsKey]))}" r="3.5"/>` : "").join("") : "";
+  const dateLabel = (date) => date.slice(5).replace("-", "/");
+  return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(options.label || "Trend chart")}">${grids}${paths}${dots}<text class="chart-axis-label" x="${left}" y="${height - 7}">${escapeHtml(dateLabel(samples[0].date))}</text><text class="chart-axis-label" x="${width - right}" y="${height - 7}" text-anchor="end">${escapeHtml(dateLabel(samples[samples.length - 1].date))}</text></svg>${options.legend || ""}`;
+}
+
+function periodStats(items) {
+  const mornings = items.map((record) => record.morning || record);
+  const weights = mornings.map((morning) => numericValue(morning.weight)).filter((value) => value !== null);
+  const sleep = mornings.map((morning) => numericValue(morning.sleep)).filter((value) => value !== null);
+  const energy = mornings.map((morning) => numericValue(morning.energy)).filter((value) => value !== null);
+  const phases = items.reduce((sum, record) => sum + phaseCount(record), 0);
+  return {
+    weightChange: weights.length > 1 ? weights[weights.length - 1] - weights[0] : null,
+    averageSleep: average(sleep), averageEnergy: average(energy),
+    phaseRate: items.length ? phases / (items.length * 3) : 0,
+    ...workoutStats(items),
+  };
+}
+
+function renderProgressInsights(items, stats) {
+  const midpoint = Math.floor(items.length / 2);
+  const earlier = periodStats(items.slice(0, midpoint));
+  const recent = periodStats(items.slice(midpoint));
+  let win;
+  if (items.length >= 4 && recent.phaseRate > earlier.phaseRate + .1) win = language === "en" ? "Your check-in completion improved in the latter half of this period." : "后半段的打卡完整度比前半段更高。";
+  else if (items.length >= 4 && recent.averageSleep && earlier.averageSleep && recent.averageSleep > earlier.averageSleep + .25) win = language === "en" ? "Your average sleep improved in the latter half of this period." : "后半段的平均睡眠比前半段有所提升。";
+  else if (stats.days >= 2) win = language === "en" ? `You completed workouts on ${stats.days} days and logged ${stats.minutes} minutes.` : `这段时间完成了 ${stats.days} 天训练，共记录 ${stats.minutes} 分钟。`;
+  else win = language === "en" ? `You recorded ${items.length} days. Consistency will make the trends more useful.` : `已记录 ${items.length} 天；继续保持，趋势会越来越有参考价值。`;
+
+  let focus;
+  if (stats.averageSleep !== null && stats.averageSleep < 7) focus = language === "en" ? "Average sleep is below 7 hours. Prioritize a steadier bedtime next." : "平均睡眠不足 7 小时，下一阶段优先稳定入睡时间。";
+  else if (stats.phaseRate < .75) focus = language === "en" ? "Some daily stages are missing. Try completing one more stage on recorded days." : "部分日期缺少阶段记录，下一步先争取每天多完成一个阶段。";
+  else if (stats.days === 0) focus = language === "en" ? "No completed workout was recorded in this period. Start with one manageable session." : "这段时间还没有完成训练记录，可以先安排一次容易完成的短训练。";
+  else if (stats.averageEnergy !== null && stats.averageEnergy < 3) focus = language === "en" ? "Energy has been relatively low. Keep training load conservative and watch recovery." : "近期精力偏低，训练量先保持保守，并继续观察恢复。";
+  else focus = language === "en" ? "Keep the current rhythm and focus on accurate workout completion logs." : "保持当前节奏，下一阶段重点记录真实完成量。";
+  $("progress-insights").innerHTML = `<div class="insight-card positive"><span>${language === "en" ? "A recent win" : "最近的一个进步"}</span><strong>${escapeHtml(win)}</strong></div><div class="insight-card focus"><span>${language === "en" ? "Next focus" : "下一阶段重点"}</span><strong>${escapeHtml(focus)}</strong></div>`;
+}
+
+function renderProgress() {
+  document.querySelector(".range-toggle").setAttribute("aria-label", language === "en" ? "Progress date range" : "进度统计范围");
+  document.querySelectorAll(".range-toggle button").forEach((button) => {
+    button.classList.toggle("active", Number(button.dataset.days) === progressDays);
+    button.textContent = `${button.dataset.days} ${language === "en" ? "days" : "天"}`;
+  });
+  const items = progressRecords(progressDays);
+  $("progress-empty").classList.toggle("hidden", !!items.length);
+  $("progress-dashboard").classList.toggle("hidden", !items.length);
+  if (!items.length) return;
+  const stats = periodStats(items);
+  const weightText = stats.weightChange === null ? "—" : `${stats.weightChange > 0 ? "+" : ""}${stats.weightChange.toFixed(1)} kg`;
+  $("progress-metrics").innerHTML = [
+    [language === "en" ? "Weight change" : "体重变化", weightText, language === "en" ? `${items.length} recorded days` : `${items.length} 天有记录`],
+    [language === "en" ? "Training" : "训练完成", `${stats.days} ${language === "en" ? "days" : "天"}`, `${stats.minutes} ${language === "en" ? "minutes" : "分钟"}`],
+    [language === "en" ? "Average sleep" : "平均睡眠", stats.averageSleep === null ? "—" : `${stats.averageSleep.toFixed(1)} h`, stats.averageEnergy === null ? "—" : `${language === "en" ? "Energy" : "精力"} ${stats.averageEnergy.toFixed(1)}/5`],
+    [language === "en" ? "Stage completion" : "阶段完成率", `${Math.round(stats.phaseRate * 100)}%`, `${language === "en" ? "Current streak" : "连续记录"} ${currentStreak()} ${language === "en" ? "days" : "天"}`],
+  ].map(([label, value, detail]) => `<div class="progress-metric"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong><small>${escapeHtml(detail)}</small></div>`).join("");
+
+  const weightSamples = items.map((record) => ({ date: record.date, time: dateNumber(record.date), value: numericValue((record.morning || record).weight) })).filter((sample) => sample.value !== null);
+  const weightTrend = movingAverage(weightSamples).map((sample) => ({ ...sample, moving: sample.average }));
+  $("weight-chart").innerHTML = lineChart(weightTrend, { valueKeys: ["moving"], dotsKey: "value", label: language === "en" ? "Weight trend" : "体重趋势", decimals: 1, minimumPadding: .2 });
+  $("weight-trend-label").textContent = weightText;
+
+  const recoverySamples = items.map((record) => {
+    const morning = record.morning || record;
+    const energy = numericValue(morning.energy);
+    return { date: record.date, time: dateNumber(record.date), sleep: numericValue(morning.sleep), energyScaled: energy === null ? null : energy * 2 };
+  }).filter((sample) => sample.sleep !== null || sample.energyScaled !== null);
+  const legend = `<div class="chart-legend"><span class="legend-item">${language === "en" ? "Sleep (h)" : "睡眠（小时）"}</span><span class="legend-item energy">${language === "en" ? "Energy (×2)" : "精力（×2）"}</span></div>`;
+  $("recovery-chart").innerHTML = lineChart(recoverySamples, { valueKeys: ["sleep", "energyScaled"], label: language === "en" ? "Sleep and energy trend" : "睡眠与精力趋势", min: 0, max: 10, fixedRange: true, decimals: 0, legend });
+  $("recovery-trend-label").textContent = stats.averageSleep === null ? "—" : `${language === "en" ? "Avg" : "平均"} ${stats.averageSleep.toFixed(1)}h`;
+  renderProgressInsights(items, stats);
+}
+
+document.querySelectorAll(".range-toggle button").forEach((button) => button.addEventListener("click", () => {
+  progressDays = Number(button.dataset.days);
+  renderProgress();
+}));
+
 $("history-list").addEventListener("click", async (event) => {
   const button = event.target.closest(".delete-record");
   if (!button) return;
@@ -466,6 +639,7 @@ $("history-list").addEventListener("click", async (event) => {
     await authRequest("/api/records/delete", { date });
     records = records.filter((record) => record.date !== date);
     renderHistory();
+    renderProgress();
     populateForms();
     setDataActionStatus(language === "en" ? `Record for ${date} deleted.` : `${date} 的记录已删除。`);
   } catch (error) {
@@ -492,7 +666,7 @@ async function saveRecord(record) {
   if (!response.ok) throw new Error(result.error || (language === "en" ? "Could not save record" : "无法保存记录"));
   profile = result.profile?.confirmed || profile;
   records = [record, ...records.filter((item) => item.date !== record.date)].sort((a, b) => b.date.localeCompare(a.date));
-  renderHistory(); populateForms();
+  renderHistory(); renderProgress(); populateForms();
 }
 
 async function loadRecords() {
@@ -502,7 +676,7 @@ async function loadRecords() {
   if (!response.ok) throw new Error(result.error || (language === "en" ? "Could not load records" : "无法读取历史记录"));
   records = Array.isArray(result.records) ? result.records : [];
   profile = result.profile?.confirmed || {};
-  renderHistory(); populateForms();
+  renderHistory(); renderProgress(); populateForms();
 }
 
 async function runPhase({ phase, button, checkIn, images = [] }) {
