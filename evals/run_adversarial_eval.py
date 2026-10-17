@@ -42,7 +42,10 @@ def valid_output(phase):
                 "dinner": "均衡晚餐",
                 "principles": "保证蛋白质和饮水。",
             },
-            "training": {"loadLabel": "中等", "items": ["快走 30 分钟"]},
+            "training": {"loadLabel": "中等", "items": [{
+                "name": "快走", "sets": 1, "amount": 30, "unit": "minutes",
+                "intensity": "可以完整说短句", "restSeconds": 0,
+            }]},
             "recovery": "如有疼痛请停止。",
         }
     if phase == "midday":

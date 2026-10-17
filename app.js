@@ -43,7 +43,7 @@ const enText = {
   "数据与账号管理": "Data and account management", "你可以导出所有打卡、长期画像和 AI 建议。": "Export all check-ins, your long-term profile, and AI guidance.",
   "导出个人数据": "Export personal data", "清空长期记忆": "Clear long-term memory", "永久删除账号": "Permanently delete account",
   "这会删除所有打卡、AI 建议、请求追踪和向量记忆，且无法恢复。": "This deletes every check-in, AI response, request trace, and vector memory and cannot be undone.",
-  "输入密码确认": "Enter your password to confirm"
+  "输入密码确认": "Enter your password to confirm", "可以从早上的计划一键带入，再勾选和修改实际完成量。": "Import the morning plan, then check off and adjust what you completed."
 };
 const originalText = new WeakMap();
 const originalPlaceholder = new WeakMap();
@@ -91,18 +91,53 @@ function currentRecord() {
 
 function setValue(id, value, fallback = "") { $(id).value = value ?? fallback; }
 
-function addExerciseRow(name = "", amount = "", unit = "minutes") {
+function unitLabel(unit, amount) {
+  if (language === "en") return unit === "reps" ? "reps" : unit === "seconds" ? "sec" : "min";
+  return unit === "reps" ? "次" : unit === "seconds" ? "秒" : "分钟";
+}
+
+function normalizePlanItem(item, index = 0) {
+  if (typeof item === "string") return { name: item, sets: "", amount: "", unit: "minutes", intensity: "", restSeconds: "", planIndex: index };
+  return {
+    name: item?.name || "", sets: item?.sets ?? "", amount: item?.amount ?? "",
+    unit: item?.unit || "reps", intensity: item?.intensity || "",
+    restSeconds: item?.restSeconds ?? "", planIndex: index,
+  };
+}
+
+function addExerciseRow(exercise = {}) {
+  const name = exercise.name || "";
+  const amount = exercise.amount ?? exercise.duration ?? "";
+  const unit = exercise.unit || "minutes";
+  const completed = exercise.completed !== false;
   const row = document.createElement("div");
   row.className = "exercise-row";
-  row.innerHTML = `<input class="exercise-name" type="text" placeholder="运动名称，如快走" value="${escapeHtml(name)}" /><div class="exercise-measure"><input class="exercise-amount" type="number" min="0" max="10000" step="1" placeholder="30" value="${escapeHtml(amount)}" /><select class="exercise-unit" aria-label="单位"><option value="minutes"${unit === "minutes" ? " selected" : ""}>分钟</option><option value="reps"${unit === "reps" ? " selected" : ""}>个</option></select></div><button class="remove-exercise" type="button" aria-label="删除这项运动">×</button>`;
+  if (exercise.planIndex !== undefined && exercise.planIndex !== null) row.dataset.planIndex = exercise.planIndex;
+  row.innerHTML = `<div class="exercise-row-main"><label class="exercise-check"><input class="exercise-completed" type="checkbox"${completed ? " checked" : ""} /><span>${language === "en" ? "Done" : "完成"}</span></label><input class="exercise-name" type="text" placeholder="${language === "en" ? "Exercise, e.g. brisk walking" : "运动名称，如快走"}" value="${escapeHtml(name)}" /><button class="remove-exercise" type="button" aria-label="${language === "en" ? "Remove exercise" : "删除这项运动"}">×</button></div>
+    <div class="exercise-details">
+      <label><span>${language === "en" ? "Sets" : "组数"}</span><input class="exercise-sets" type="number" min="1" max="100" step="1" placeholder="1" value="${escapeHtml(exercise.sets ?? "")}" /></label>
+      <label><span>${language === "en" ? "Amount / set" : "每组数量"}</span><input class="exercise-amount" type="number" min="0" max="10000" step="0.5" placeholder="10" value="${escapeHtml(amount)}" /></label>
+      <label><span>${language === "en" ? "Unit" : "单位"}</span><select class="exercise-unit" aria-label="${language === "en" ? "Unit" : "单位"}"><option value="reps"${unit === "reps" ? " selected" : ""}>${language === "en" ? "reps" : "次"}</option><option value="minutes"${unit === "minutes" ? " selected" : ""}>${language === "en" ? "min" : "分钟"}</option><option value="seconds"${unit === "seconds" ? " selected" : ""}>${language === "en" ? "sec" : "秒"}</option></select></label>
+      <label><span>${language === "en" ? "Load (kg)" : "负重（kg）"}</span><input class="exercise-load" type="number" min="0" max="1000" step="0.5" placeholder="—" value="${escapeHtml(exercise.loadKg ?? "")}" /></label>
+    </div>
+    ${exercise.intensity || exercise.restSeconds !== "" ? `<p class="exercise-target">${language === "en" ? "Target" : "计划"}：${escapeHtml(exercise.intensity)}${exercise.restSeconds !== "" ? ` · ${language === "en" ? "rest" : "休息"} ${escapeHtml(exercise.restSeconds)} ${language === "en" ? "sec" : "秒"}` : ""}</p>` : ""}`;
   row.querySelector(".remove-exercise").addEventListener("click", () => {
     row.remove();
     if (!$("exercise-list").children.length) {
       addExerciseRow();
       applyLanguage();
     }
+    syncPlanAdherenceFromExercises();
   });
+  row.querySelector(".exercise-completed").addEventListener("change", syncPlanAdherenceFromExercises);
   $("exercise-list").appendChild(row);
+}
+
+function syncPlanAdherenceFromExercises() {
+  const plannedRows = Array.from(document.querySelectorAll(".exercise-row[data-plan-index]"));
+  if (!plannedRows.length) return;
+  const completed = plannedRows.filter((row) => row.querySelector(".exercise-completed").checked).length;
+  setValue("plan-adherence", completed === plannedRows.length ? "all" : completed === 0 ? "none" : "partial");
 }
 
 $("add-exercise").addEventListener("click", () => {
@@ -286,6 +321,29 @@ function list(items) {
   return Array.isArray(items) && items.length ? `<ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : "";
 }
 
+function trainingItems(items) {
+  if (!Array.isArray(items) || !items.length) return "";
+  return `<div class="training-plan-list">${items.map((item) => {
+    const normalized = normalizePlanItem(item);
+    const structured = item && typeof item === "object";
+    const prescription = `${normalized.sets} × ${normalized.amount} ${unitLabel(normalized.unit, normalized.amount)}`;
+    const rest = normalized.restSeconds ? ` · ${language === "en" ? "rest" : "休息"} ${normalized.restSeconds}${language === "en" ? " sec" : " 秒"}` : "";
+    return `<div class="training-plan-item"><strong>${escapeHtml(normalized.name)}</strong>${structured ? `<span>${escapeHtml(prescription)}</span><small>${escapeHtml(normalized.intensity)}${escapeHtml(rest)}</small>` : ""}</div>`;
+  }).join("")}</div><button id="use-training-plan" class="secondary-button use-training-plan" type="button">${language === "en" ? "Use this as workout log" : "一键带入训练记录"} <span>→</span></button>`;
+}
+
+function bindTrainingPlan(items) {
+  const button = $("use-training-plan");
+  if (!button || !Array.isArray(items)) return;
+  button.addEventListener("click", () => {
+    $("exercise-list").innerHTML = "";
+    items.forEach((item, index) => addExerciseRow({ ...normalizePlanItem(item, index), completed: false }));
+    syncPlanAdherenceFromExercises();
+    switchPhase("midday", false);
+    $("midday-form").scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+}
+
 function isValidScore(value) {
   if (value === null || value === undefined || value === "") return false;
   const score = Number(value);
@@ -307,7 +365,7 @@ function renderCoachResponse(response, phase) {
     const score = hasScore ? `<div class="score-card"><div class="score-number">${escapeHtml(evaluation.score)}<small>/100</small></div><div><strong>昨天表现</strong><p>${escapeHtml(evaluation.summary)}</p></div></div>` : "";
     const meals = response.meals || {};
     $("plan-content").innerHTML = `${score}<div class="plan-intro"><strong>${escapeHtml(response.title)}</strong><br />${escapeHtml(response.summary)}</div>
-      <div class="plan-section"><span class="tag">${escapeHtml(response.training?.loadLabel || "今日训练")}</span><h3>今天的运动</h3>${list(response.training?.items)}</div>
+      <div class="plan-section"><span class="tag">${escapeHtml(response.training?.loadLabel || "今日训练")}</span><h3>今天的运动</h3>${trainingItems(response.training?.items)}</div>
       <div class="plan-section"><h3>今天怎么吃</h3><div class="meal-grid"><p><strong>早餐</strong>${escapeHtml(meals.breakfast || "均衡早餐")}</p><p><strong>午餐</strong>${escapeHtml(meals.lunch || "均衡午餐")}</p><p><strong>晚餐</strong>${escapeHtml(meals.dinner || "均衡晚餐")}</p></div>${meals.principles ? `<p>${escapeHtml(meals.principles)}</p>` : ""}</div>
       <div class="plan-section"><h3>恢复提醒</h3><p>${escapeHtml(response.recovery || "根据身体感受调整强度。")}</p></div>`;
   } else if (phase === "midday") {
@@ -315,6 +373,7 @@ function renderCoachResponse(response, phase) {
   } else {
     $("plan-content").innerHTML = `<div class="plan-intro"><strong>${escapeHtml(response.title)}</strong><br />${escapeHtml(response.summary)}</div><div class="plan-section"><h3>今天做得好的地方</h3>${list(response.wins)}</div><div class="plan-section"><h3>明早评分会关注</h3>${list(response.tomorrowScoreFactors)}</div><div class="plan-section"><h3>今晚提醒</h3><p>${escapeHtml(response.tonightTip || "早点休息并适量补水。")}</p></div>`;
   }
+  if (phase === "morning") bindTrainingPlan(response.training?.items);
   applyLanguage();
 }
 
@@ -369,7 +428,7 @@ function populateForms() {
   setValue("energy", morning.energy, "3"); setValue("soreness", morning.soreness, "2"); setValue("available-time", morning.availableTime, "45"); setValue("morning-notes", morning.notes);
   $("exercise-list").innerHTML = "";
   const exercises = Array.isArray(midday.exercises) && midday.exercises.length ? midday.exercises : midday.workout ? [{ name: midday.workout, duration: midday.duration || "" }] : [{ name: "", duration: "" }];
-  exercises.forEach((exercise) => addExerciseRow(exercise.name, exercise.amount ?? exercise.duration, exercise.unit || "minutes"));
+  exercises.forEach((exercise) => addExerciseRow(exercise));
   setValue("plan-adherence", midday.planAdherence, "partial"); setValue("workout-effort", midday.effort, "3"); setValue("workout-notes", midday.notes);
   setValue("food", evening.food); setValue("bowel-frequency", evening.bowelFrequency, "1"); setValue("bowel-form", evening.bowelForm, "normal"); setValue("bowel-symptoms", evening.bowelSymptoms, "none"); setValue("evening-notes", evening.notes);
   $("morning-saved").textContent = record.morning || record.weight ? "✓ 已保存" : "";
@@ -493,8 +552,17 @@ $("morning-form").addEventListener("submit", (event) => {
 
 $("midday-form").addEventListener("submit", (event) => {
   event.preventDefault();
-  const exercises = Array.from(document.querySelectorAll(".exercise-row")).map((row) => ({ name: row.querySelector(".exercise-name").value.trim(), amount: row.querySelector(".exercise-amount").value, unit: row.querySelector(".exercise-unit").value })).filter((exercise) => exercise.name || exercise.amount);
-  const totalDuration = exercises.filter((exercise) => exercise.unit === "minutes").reduce((sum, exercise) => sum + (Number(exercise.amount) || 0), 0);
+  syncPlanAdherenceFromExercises();
+  const exercises = Array.from(document.querySelectorAll(".exercise-row")).map((row) => ({
+    name: row.querySelector(".exercise-name").value.trim(),
+    sets: row.querySelector(".exercise-sets").value,
+    amount: row.querySelector(".exercise-amount").value,
+    unit: row.querySelector(".exercise-unit").value,
+    loadKg: row.querySelector(".exercise-load").value,
+    completed: row.querySelector(".exercise-completed").checked,
+    planIndex: row.dataset.planIndex === undefined ? null : Number(row.dataset.planIndex),
+  })).filter((exercise) => exercise.name || exercise.amount);
+  const totalDuration = exercises.filter((exercise) => exercise.completed && exercise.unit === "minutes").reduce((sum, exercise) => sum + (Number(exercise.sets) || 1) * (Number(exercise.amount) || 0), 0);
   runPhase({ phase: "midday", button: $("midday-submit"), checkIn: { date: $("log-date").value, exercises, totalDuration, planAdherence: $("plan-adherence").value, effort: $("workout-effort").value, notes: $("workout-notes").value.trim() } });
 });
 

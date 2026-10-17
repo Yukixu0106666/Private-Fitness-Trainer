@@ -202,6 +202,23 @@ class RecordPersistenceTests(unittest.TestCase):
                 self.assertEqual(merged["plan"]["title"], "早间")
                 self.assertNotIn("stretch", merged)
 
+    def test_compact_record_compares_structured_plan_with_actual_workout(self):
+        compact = server.compact_record({
+            "date": "2026-09-22",
+            "plan": {"training": {"items": [
+                {"name": "深蹲", "sets": 3, "amount": 10, "unit": "reps", "intensity": "RPE 7", "restSeconds": 60},
+                {"name": "快走", "sets": 1, "amount": 20, "unit": "minutes", "intensity": "轻松", "restSeconds": 0},
+            ]}},
+            "midday": {"exercises": [
+                {"planIndex": 0, "name": "深蹲", "sets": 3, "amount": 8, "unit": "reps", "loadKg": 20, "completed": True},
+                {"planIndex": 1, "name": "快走", "sets": 1, "amount": 20, "unit": "minutes", "completed": False},
+            ]},
+        })
+        comparison = compact["trainingComparison"]
+        self.assertEqual(comparison["completionRate"], 0.5)
+        self.assertEqual(comparison["items"][0]["quantityRatio"], 0.8)
+        self.assertEqual(comparison["items"][1]["quantityRatio"], 0)
+
     def test_startup_migrates_legacy_mixed_records(self):
         with tempfile.TemporaryDirectory() as directory:
             database = os.path.join(directory, "fitness.db")
@@ -252,13 +269,52 @@ class FactValidationTests(unittest.TestCase):
                 "wins": ["完成训练"], "improve": ["早点休息"],
             },
             "meals": {"breakfast": "早餐", "lunch": "午餐", "dinner": "晚餐", "principles": "均衡饮食"},
-            "training": {"loadLabel": "中等", "items": ["快走 30 分钟"]},
+            "training": {"loadLabel": "中等", "items": [{
+                "name": "快走", "sets": 1, "amount": 30, "unit": "minutes",
+                "intensity": "可以完整说短句", "restSeconds": 0,
+            }]},
             "recovery": "如有疼痛请停止。",
         }
         validated, validation = server.validate_coach_output(output, "morning", {"previousDay": None})
         self.assertIsNone(validated["previousDayEvaluation"]["score"])
         self.assertEqual(validated["previousDayEvaluation"]["date"], "")
         self.assertIn("cleared_unverified_previous_day_score", validation["adjustments"])
+
+    def test_structured_training_items_are_normalized_and_validated(self):
+        output = {
+            "title": "今日计划", "summary": "进行全身训练。",
+            "previousDayEvaluation": {
+                "date": "", "score": None, "summary": "暂无昨日记录。",
+                "wins": [], "improve": [],
+            },
+            "meals": {"breakfast": "早餐", "lunch": "午餐", "dinner": "晚餐", "principles": "均衡饮食"},
+            "training": {"loadLabel": "中等", "items": [{
+                "name": "深蹲", "sets": 3.0, "amount": 10, "unit": "reps",
+                "intensity": "保留 2 次余力", "restSeconds": 60.0,
+            }]},
+            "recovery": "动作不适时停止。",
+        }
+        validated, _ = server.validate_coach_output(output, "morning", {"previousDay": None})
+        self.assertEqual(validated["training"]["items"][0]["sets"], 3)
+        self.assertEqual(validated["training"]["items"][0]["restSeconds"], 60)
+
+        output["training"]["items"][0]["unit"] = "kilometers"
+        with self.assertRaisesRegex(ValueError, "unit"):
+            server.validate_coach_output(output, "morning", {"previousDay": None})
+
+    def test_midday_exercise_structure_is_validated(self):
+        server.validate_record_input({
+            "date": "2026-09-22",
+            "midday": {"exercises": [{
+                "name": "深蹲", "sets": "3", "amount": "10", "unit": "reps",
+                "loadKg": "20", "completed": True,
+            }]},
+        })
+        with self.assertRaisesRegex(ValueError, "完成状态"):
+            server.validate_record_input({
+                "date": "2026-09-22",
+                "midday": {"exercises": [{"name": "深蹲", "completed": "yes"}]},
+            })
 
     def test_health_safety_gate_detects_emergency_symptoms(self):
         alert = server.detect_health_red_flags({

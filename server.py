@@ -142,6 +142,23 @@ def validate_record_input(record):
     validate_number(morning.get("soreness"), "酸痛", 1, 5)
     midday = record.get("midday") if isinstance(record.get("midday"), dict) else {}
     validate_number(midday.get("totalDuration"), "训练时长", 0, 1440)
+    exercises = midday.get("exercises", [])
+    if not isinstance(exercises, list) or len(exercises) > 30:
+        raise ValueError("训练项目格式无效")
+    for index, exercise in enumerate(exercises):
+        if not isinstance(exercise, dict):
+            raise ValueError(f"第 {index + 1} 项训练格式无效")
+        if exercise.get("unit") not in (None, "", "minutes", "seconds", "reps"):
+            raise ValueError(f"第 {index + 1} 项训练单位无效")
+        validate_number(exercise.get("sets"), f"第 {index + 1} 项训练组数", 1, 100)
+        validate_number(exercise.get("amount"), f"第 {index + 1} 项训练数量", 0, 10000)
+        validate_number(exercise.get("loadKg"), f"第 {index + 1} 项训练负重", 0, 1000)
+        if exercise.get("planIndex") is not None:
+            plan_index = numeric(exercise.get("planIndex"))
+            if plan_index is None or not 0 <= plan_index < 30 or not plan_index.is_integer():
+                raise ValueError(f"第 {index + 1} 项训练计划索引无效")
+        if "completed" in exercise and not isinstance(exercise.get("completed"), bool):
+            raise ValueError(f"第 {index + 1} 项训练完成状态无效")
 
 
 def validate_images(images):
@@ -874,6 +891,51 @@ FUNCTION_TOOLS = [
 ]
 
 
+def compare_training_plan(plan_items, actual_exercises):
+    if not isinstance(plan_items, list) or not plan_items:
+        return None
+    actual_exercises = actual_exercises if isinstance(actual_exercises, list) else []
+    indexed_actual = {
+        int(item["planIndex"]): item for item in actual_exercises
+        if isinstance(item, dict) and isinstance(item.get("planIndex"), (int, float))
+        and not isinstance(item.get("planIndex"), bool)
+    }
+    comparisons = []
+    completed_count = 0
+    for index, planned in enumerate(plan_items):
+        planned = planned if isinstance(planned, dict) else {"name": str(planned)}
+        actual = indexed_actual.get(index)
+        if actual is None:
+            planned_name = str(planned.get("name", "")).strip().lower()
+            actual = next((
+                item for item in actual_exercises
+                if isinstance(item, dict) and str(item.get("name", "")).strip().lower() == planned_name
+            ), None)
+        completed = bool(actual and actual.get("completed", True))
+        if completed:
+            completed_count += 1
+        ratio = None
+        if actual and planned.get("unit") == actual.get("unit"):
+            planned_volume = (numeric(planned.get("sets")) or 1) * (numeric(planned.get("amount")) or 0)
+            actual_volume = (numeric(actual.get("sets")) or 1) * (numeric(actual.get("amount")) or 0)
+            if planned_volume > 0:
+                ratio = round(actual_volume / planned_volume, 2) if completed else 0
+        comparisons.append({
+            "planIndex": index,
+            "name": planned.get("name", ""),
+            "completed": completed,
+            "planned": {key: planned.get(key) for key in ("sets", "amount", "unit", "intensity", "restSeconds")},
+            "actual": ({key: actual.get(key) for key in ("sets", "amount", "unit", "loadKg")} if actual else None),
+            "quantityRatio": ratio,
+        })
+    return {
+        "plannedCount": len(plan_items),
+        "completedCount": completed_count,
+        "completionRate": round(completed_count / len(plan_items), 2),
+        "items": comparisons,
+    }
+
+
 def compact_record(record):
     morning = record.get("morning") or {key: record.get(key) for key in ("weight", "sleep", "energy", "soreness", "notes")}
     midday = record.get("midday") or ({"workout": record.get("workout")} if record.get("workout") else None)
@@ -884,6 +946,10 @@ def compact_record(record):
         "morning": morning, "midday": midday, "evening": evening,
         "assignedTraining": (plan.get("training") or {}).get("items", []),
     }
+    if isinstance(midday, dict):
+        comparison = compare_training_plan(compact["assignedTraining"], midday.get("exercises"))
+        if comparison:
+            compact["trainingComparison"] = comparison
     if isinstance(evening, dict) and isinstance(evening.get("food"), str):
         compact["evening"] = {**evening, "food": evening["food"][:600]}
     return compact
@@ -1430,9 +1496,9 @@ def prompt_for(body, memory):
     phase = check_in.get("phase", "morning")
     language = "English" if body.get("language") == "en" else "Chinese"
     phase_tasks = {
-        "morning": """这是早间教练。根据今早体重、睡眠、精力、酸痛、可用时间、最近14天趋势和前一天完整记录，制定今天三餐与运动计划。若有前一天记录，用模型综合完成度、运动量、饮食结构、排便、恢复和目标给前一天打0-100分；评分必须解释依据，不得因为减重越多就机械加分。若没有前一天记录，score必须为null。输出严格JSON：
-{"title":"今日重点，不超过20字","summary":"两句以内","previousDayEvaluation":{"date":"被评分日期或空字符串","score":null,"summary":"评分说明","wins":["优点"],"improve":["改进点"]},"meals":{"breakfast":"具体早餐","lunch":"具体午餐","dinner":"具体晚餐","principles":"份量、蛋白质和饮水原则"},"training":{"loadLabel":"训练强度","items":["4-6条含动作、组数或时间的安排"]},"recovery":"安全和恢复提醒"}""",
-        "midday": """这是训练后教练。比较早间训练建议与用户实际运动、运动量、主观强度和完成程度；每项运动的 amount 是数值，unit 为 minutes（分钟）或 reps（个），totalDuration 只统计按分钟记录的项目。立即生成针对实际使用肌群的拉伸和冷身建议。疼痛时不得建议强行拉伸。输出严格JSON：
+        "morning": """这是早间教练。根据今早体重、睡眠、精力、酸痛、可用时间、最近14天趋势和前一天完整记录，制定今天三餐与运动计划。若有前一天记录，用模型综合完成度、运动量、饮食结构、排便、恢复和目标给前一天打0-100分；评分必须解释依据，不得因为减重越多就机械加分。若没有前一天记录，score必须为null。生成 4-6 个结构化训练项目：sets 是组数；amount 是每组次数或时长；unit 只能是 reps、minutes 或 seconds；intensity 是用户能理解的目标强度；restSeconds 是组间休息秒数。有氧连续训练使用 sets=1、amount=总时长、unit=minutes。输出严格JSON：
+{"title":"今日重点，不超过20字","summary":"两句以内","previousDayEvaluation":{"date":"被评分日期或空字符串","score":null,"summary":"评分说明","wins":["优点"],"improve":["改进点"]},"meals":{"breakfast":"具体早餐","lunch":"具体午餐","dinner":"具体晚餐","principles":"份量、蛋白质和饮水原则"},"training":{"loadLabel":"训练强度","items":[{"name":"动作名称","sets":3,"amount":10,"unit":"reps","intensity":"保留2-3次余力","restSeconds":60}]},"recovery":"安全和恢复提醒"}""",
+        "midday": """这是训练后教练。比较早间结构化训练建议与用户实际运动、组数、每组数量、单位、负重、完成勾选、主观强度和完成程度；planIndex 对应早间 training.items 的位置。unit 可为 minutes（分钟）、seconds（秒）或 reps（次），totalDuration 只统计已完成的分钟项目。立即生成针对实际使用肌群的拉伸和冷身建议。疼痛时不得建议强行拉伸。输出严格JSON：
 {"title":"训练后重点，不超过20字","summary":"对本次完成情况的简短反馈","stretch":{"duration":"总拉伸时长","items":["4-6条含部位、动作和保持时间的拉伸"],"safety":"安全提醒"}}""",
         "evening": """这是晚间复盘教练。结合今天早间状态与计划、实际运动、全天饮食、排便和用户感受做简短复盘，不提前给出最终分数；说明明早模型评分会参考哪些实际数据。不要诊断疾病或精确估算无法确认的热量。输出严格JSON：
 {"title":"今日复盘，不超过20字","summary":"两句以内","wins":["1-3条今天做得好的地方"],"tomorrowScoreFactors":["2-4条明早评分会参考的因素"],"tonightTip":"今晚可执行的恢复建议"}""",
@@ -1462,6 +1528,38 @@ def require_text_list(value, path):
         raise ValueError(f"模型返回的 {path} 必须是文本数组")
 
 
+def require_training_items(value):
+    if not isinstance(value, list) or not 1 <= len(value) <= 8:
+        raise ValueError("模型返回的 training.items 必须是非空数组")
+    normalized = []
+    for index, item in enumerate(value):
+        path = f"training.items[{index}]"
+        exercise = require_object(item, path)
+        require_text(exercise.get("name"), f"{path}.name")
+        require_text(exercise.get("intensity"), f"{path}.intensity")
+        unit = exercise.get("unit")
+        if unit not in ("minutes", "seconds", "reps"):
+            raise ValueError(f"模型返回的 {path}.unit 无效")
+        sets = numeric(exercise.get("sets"))
+        amount = numeric(exercise.get("amount"))
+        rest_seconds = numeric(exercise.get("restSeconds"))
+        if sets is None or not 1 <= sets <= 20 or not sets.is_integer():
+            raise ValueError(f"模型返回的 {path}.sets 必须是 1-20 的整数")
+        if amount is None or not 0 < amount <= 10000:
+            raise ValueError(f"模型返回的 {path}.amount 必须是正数")
+        if rest_seconds is None or not 0 <= rest_seconds <= 600 or not rest_seconds.is_integer():
+            raise ValueError(f"模型返回的 {path}.restSeconds 必须是 0-600 的整数")
+        normalized.append({
+            "name": exercise["name"].strip(),
+            "sets": int(sets),
+            "amount": round(amount, 2),
+            "unit": unit,
+            "intensity": exercise["intensity"].strip(),
+            "restSeconds": int(rest_seconds),
+        })
+    return normalized
+
+
 def validate_coach_output(output, phase, memory):
     plan = require_object(output, "根节点")
     adjustments = []
@@ -1474,7 +1572,7 @@ def validate_coach_output(output, phase, memory):
         for key in ("breakfast", "lunch", "dinner", "principles"):
             require_text(meals.get(key), f"meals.{key}")
         require_text(training.get("loadLabel"), "training.loadLabel")
-        require_text_list(training.get("items"), "training.items")
+        training["items"] = require_training_items(training.get("items"))
         require_text(plan.get("recovery"), "recovery")
         for key in ("summary",):
             require_text(evaluation.get(key), f"previousDayEvaluation.{key}")
