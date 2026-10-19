@@ -8,6 +8,7 @@ import secrets
 import sqlite3
 import threading
 import time
+import unicodedata
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
@@ -964,6 +965,146 @@ def numeric(value):
         return None
 
 
+def normalize_exercise_name(value):
+    if not isinstance(value, str):
+        return ""
+    normalized = unicodedata.normalize("NFKC", value).strip().casefold()
+    return re.sub(r"[\s\-_]+", "", normalized)
+
+
+def _clean_progress_number(value):
+    number = numeric(value)
+    if number is None:
+        return None
+    return int(number) if number.is_integer() else round(number, 2)
+
+
+def _exercise_target(entry):
+    return {
+        "sets": entry.get("sets"),
+        "amount": entry.get("amount"),
+        "unit": entry.get("unit"),
+        "loadKg": entry.get("loadKg"),
+    }
+
+
+def _progression_suggestion(entries):
+    recent = entries[-3:][::-1]
+    completed = [entry for entry in entries if entry["completed"]]
+    if not completed:
+        return {"action": "baseline", "reason": "no_completed_history", "target": None}
+
+    last_completed = completed[-1]
+    target = _exercise_target(last_completed)
+    consecutive_incomplete = 0
+    for entry in reversed(entries):
+        if entry["completed"]:
+            break
+        consecutive_incomplete += 1
+    if consecutive_incomplete >= 2:
+        load = numeric(target.get("loadKg"))
+        amount = numeric(target.get("amount"))
+        if load is not None and load > 0:
+            target["loadKg"] = max(0, round(load * 0.95 * 2) / 2)
+        elif amount is not None and amount > 0:
+            target["amount"] = max(1, math.floor(amount * 0.9))
+        return {"action": "reduce", "reason": "repeated_incomplete", "target": target}
+
+    latest_two = recent[:2]
+    ready_to_progress = len(latest_two) == 2 and all(
+        entry["completed"] and entry.get("effort") is not None and entry["effort"] <= 3
+        for entry in latest_two
+    )
+    if ready_to_progress:
+        load = numeric(target.get("loadKg"))
+        amount = numeric(target.get("amount"))
+        unit = target.get("unit")
+        if load is not None and load > 0:
+            increased = math.ceil(load * 1.025 * 2) / 2
+            target["loadKg"] = round(max(load + 0.5, increased), 1)
+        elif amount is not None:
+            if unit == "reps":
+                target["amount"] = _clean_progress_number(amount + 1)
+            elif unit == "minutes":
+                target["amount"] = _clean_progress_number(amount + max(1, round(amount * 0.1)))
+            elif unit == "seconds":
+                target["amount"] = _clean_progress_number(amount + max(5, round(amount * 0.1 / 5) * 5))
+        return {"action": "increase", "reason": "two_completed_moderate", "target": target}
+
+    reason = "recent_incomplete" if recent and not recent[0]["completed"] else "build_consistency"
+    if recent and recent[0].get("effort") is not None and recent[0]["effort"] >= 4:
+        reason = "recent_effort_high"
+    return {"action": "maintain", "reason": reason, "target": target}
+
+
+def exercise_progress(records, before_date=None, window_days=28):
+    """Summarize exercise performance before a date without model inference."""
+    if before_date:
+        validate_date(before_date)
+        cutoff_date = datetime.strptime(before_date, "%Y-%m-%d").date() - timedelta(days=window_days)
+    else:
+        cutoff_date = now().date() - timedelta(days=window_days)
+    grouped = {}
+    for record in sorted(records, key=lambda item: item.get("date", "")):
+        date = record.get("date")
+        if not isinstance(date, str) or (before_date and date >= before_date):
+            continue
+        try:
+            parsed_date = datetime.strptime(date, "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        midday = record.get("midday") if isinstance(record.get("midday"), dict) else {}
+        effort = numeric(midday.get("effort"))
+        for exercise in midday.get("exercises") or []:
+            if not isinstance(exercise, dict):
+                continue
+            name = str(exercise.get("name") or "").strip()
+            key = normalize_exercise_name(name)
+            if not key:
+                continue
+            entry = {
+                "date": date,
+                "name": name,
+                "sets": _clean_progress_number(exercise.get("sets")) or 1,
+                "amount": _clean_progress_number(exercise.get("amount", exercise.get("duration"))),
+                "unit": exercise.get("unit") or "minutes",
+                "loadKg": _clean_progress_number(exercise.get("loadKg")),
+                "completed": exercise.get("completed", True) is True,
+                "effort": _clean_progress_number(effort),
+                "inWindow": parsed_date >= cutoff_date,
+            }
+            grouped.setdefault(key, []).append(entry)
+
+    summaries = []
+    for key, entries in grouped.items():
+        completed = [entry for entry in entries if entry["completed"]]
+        window_entries = [entry for entry in entries if entry["inWindow"]]
+        window_completed = [entry for entry in window_entries if entry["completed"]]
+        best_pool = window_completed or completed
+        best = max(
+            best_pool,
+            key=lambda entry: (
+                numeric(entry.get("loadKg")) or 0,
+                (numeric(entry.get("sets")) or 1) * (numeric(entry.get("amount")) or 0),
+            ),
+            default=None,
+        )
+        summaries.append({
+            "key": key,
+            "name": entries[-1]["name"],
+            "last": entries[-1],
+            "lastCompleted": completed[-1] if completed else None,
+            "best": best,
+            "recent28Days": {
+                "sessions": len(window_entries),
+                "completed": len(window_completed),
+                "completionRate": round(len(window_completed) / len(window_entries), 2) if window_entries else None,
+            },
+            "suggestion": _progression_suggestion(entries),
+        })
+    return sorted(summaries, key=lambda item: item["last"]["date"], reverse=True)
+
+
 def derived_stats(records):
     chronological = list(reversed(records))
     weight_samples = []
@@ -1244,8 +1385,10 @@ def build_memory_context(user_id, check_in, trace=None):
     phase = check_in.get("phase", "morning")
     profile = load_profile(user_id)
     current = record_by_date(user_id, date)
-    recent_facts = fact_records(user_id, limit=14, before_or_on=date)
+    history_facts = fact_records(user_id, before_or_on=date)
+    recent_facts = history_facts[:14]
     stats = derived_stats(recent_facts)
+    training_progress = exercise_progress(history_facts, date)[:20]
     prior = record_by_date(user_id, previous_date(date)) if phase == "morning" else None
     semantic_matches = []
     vector_status = {"enabled": vector_store_enabled(), "indexed": 0, "retrieved": 0}
@@ -1280,6 +1423,13 @@ def build_memory_context(user_id, check_in, trace=None):
             "id": f"derived:recent14:{stats['period']['from']}:{stats['period']['to']}",
             "type": "server_derived_stats", "period": stats["period"],
             "recordCount": stats["recordCount"],
+        })
+    if training_progress:
+        sources.append({
+            "id": f"derived:exercise_progress:{date}",
+            "type": "server_derived_exercise_progress",
+            "exerciseCount": len(training_progress),
+            "windowDays": 28,
         })
     if semantic_matches:
         sources.append({
@@ -1319,6 +1469,7 @@ def build_memory_context(user_id, check_in, trace=None):
         "currentDay": compact_record(current) if current else None,
         "previousDay": compact_record(prior) if prior else None,
         "recent14DayStats": stats,
+        "exerciseProgress": training_progress,
         "semanticMatches": [json.loads(item["content"]) for item in semantic_matches],
         "vectorRetrieval": vector_status,
         "provenance": provenance,
@@ -1496,7 +1647,7 @@ def prompt_for(body, memory):
     phase = check_in.get("phase", "morning")
     language = "English" if body.get("language") == "en" else "Chinese"
     phase_tasks = {
-        "morning": """这是早间教练。根据今早体重、睡眠、精力、酸痛、可用时间、最近14天趋势和前一天完整记录，制定今天三餐与运动计划。若有前一天记录，用模型综合完成度、运动量、饮食结构、排便、恢复和目标给前一天打0-100分；评分必须解释依据，不得因为减重越多就机械加分。若没有前一天记录，score必须为null。生成 4-6 个结构化训练项目：sets 是组数；amount 是每组次数或时长；unit 只能是 reps、minutes 或 seconds；intensity 是用户能理解的目标强度；restSeconds 是组间休息秒数。有氧连续训练使用 sets=1、amount=总时长、unit=minutes。输出严格JSON：
+        "morning": """这是早间教练。根据今早体重、睡眠、精力、酸痛、可用时间、最近14天趋势和前一天完整记录，制定今天三餐与运动计划。若 exerciseProgress 中有同名动作，应优先采用其确定性 suggestion.target，不得跳过维持或回退建议擅自加量。若有前一天记录，用模型综合完成度、运动量、饮食结构、排便、恢复和目标给前一天打0-100分；评分必须解释依据，不得因为减重越多就机械加分。若没有前一天记录，score必须为null。生成 4-6 个结构化训练项目：sets 是组数；amount 是每组次数或时长；unit 只能是 reps、minutes 或 seconds；intensity 是用户能理解的目标强度；restSeconds 是组间休息秒数。有氧连续训练使用 sets=1、amount=总时长、unit=minutes。输出严格JSON：
 {"title":"今日重点，不超过20字","summary":"两句以内","previousDayEvaluation":{"date":"被评分日期或空字符串","score":null,"summary":"评分说明","wins":["优点"],"improve":["改进点"]},"meals":{"breakfast":"具体早餐","lunch":"具体午餐","dinner":"具体晚餐","principles":"份量、蛋白质和饮水原则"},"training":{"loadLabel":"训练强度","items":[{"name":"动作名称","sets":3,"amount":10,"unit":"reps","intensity":"保留2-3次余力","restSeconds":60}]},"recovery":"安全和恢复提醒"}""",
         "midday": """这是训练后教练。比较早间结构化训练建议与用户实际运动、组数、每组数量、单位、负重、完成勾选、主观强度和完成程度；planIndex 对应早间 training.items 的位置。unit 可为 minutes（分钟）、seconds（秒）或 reps（次），totalDuration 只统计已完成的分钟项目。立即生成针对实际使用肌群的拉伸和冷身建议。疼痛时不得建议强行拉伸。输出严格JSON：
 {"title":"训练后重点，不超过20字","summary":"对本次完成情况的简短反馈","stretch":{"duration":"总拉伸时长","items":["4-6条含部位、动作和保持时间的拉伸"],"safety":"安全提醒"}}""",
@@ -1508,7 +1659,7 @@ def prompt_for(body, memory):
     for image in images[:4]:
         if isinstance(image, str) and image.startswith("data:image/"):
             content.append({"type": "image_url", "image_url": {"url": image, "detail": "low"}})
-    system = f"""你是一名谨慎的健身教练 Agent。服务端已按阶段提供 fixedMemory，其中 confirmedProfile 是用户确认信息；currentDay 和 previousDay 的 morning、midday、evening 是用户事实，assignedTraining 是单独保存的 AI 计划，只能用于比较而不能视为实际完成；recent14DayStats 是服务端确定性计算结果；semanticMatches 是经过用户隔离、日期过滤、向量召回与重排的历史事实；provenance 列出固定检索来源。不得猜测固定来源或成功工具结果中没有的数据。工具只用于可选补充，无需为了回答而调用。必须只输出任务指定结构的有效 JSON，不要 Markdown。所有面向用户的JSON值必须使用{language}。建议应具体、温和、可执行；不得诊断疾病。评分属于基于历史记录的模型估计而非医学结论，并应避免体重数字偏见。"""
+    system = f"""你是一名谨慎的健身教练 Agent。服务端已按阶段提供 fixedMemory，其中 confirmedProfile 是用户确认信息；currentDay 和 previousDay 的 morning、midday、evening 是用户事实，assignedTraining 是单独保存的 AI 计划，只能用于比较而不能视为实际完成；recent14DayStats 与 exerciseProgress 是服务端确定性计算结果；semanticMatches 是经过用户隔离、日期过滤、向量召回与重排的历史事实；provenance 列出固定检索来源。不得猜测固定来源或成功工具结果中没有的数据。工具只用于可选补充，无需为了回答而调用。必须只输出任务指定结构的有效 JSON，不要 Markdown。所有面向用户的JSON值必须使用{language}。建议应具体、温和、可执行；不得诊断疾病。评分属于基于历史记录的模型估计而非医学结论，并应避免体重数字偏见。"""
     return [{"role": "system", "content": system}, {"role": "user", "content": content}]
 
 
@@ -1645,10 +1796,18 @@ class Handler(SimpleHTTPRequestHandler):
         params = parse_qs(urlparse(self.path).query)
         if path == "/api/me":
             self.send_json(200, {"user": self.current_user()})
-        elif path in ("/api/records", "/api/metrics", "/api/traces", "/api/export"):
+        elif path in ("/api/records", "/api/exercise-progress", "/api/metrics", "/api/traces", "/api/export"):
             user = self.current_user()
             if not user:
                 self.send_json(401, {"error": "请先登录"})
+            elif path == "/api/exercise-progress":
+                before = params.get("before", [now().date().isoformat()])[0]
+                try:
+                    validate_date(before)
+                except ValueError as error:
+                    self.send_json(400, {"error": str(error)})
+                    return
+                self.send_json(200, {"exercises": exercise_progress(fact_records(user["id"]), before)})
             elif path == "/api/metrics":
                 self.send_json(200, trace_metrics(user["id"], params.get("limit", ["100"])[0]))
             elif path == "/api/traces":

@@ -9,6 +9,7 @@ let photos = [];
 let photoPreviewUrls = [];
 let records = [];
 let profile = {};
+let exerciseProgress = [];
 let registerMode = false;
 let progressDays = 14;
 let activePhase = today.getHours() < 11 ? "morning" : today.getHours() < 18 ? "midday" : "evening";
@@ -109,6 +110,59 @@ function normalizePlanItem(item, index = 0) {
   };
 }
 
+function exerciseKey(value) {
+  return String(value || "").normalize("NFKC").trim().toLocaleLowerCase().replace(/[\s\-_]+/g, "");
+}
+
+function formatPerformance(entry) {
+  if (!entry) return language === "en" ? "no completed session" : "暂无完成记录";
+  const amount = entry.amount ?? "—";
+  const sets = entry.sets ?? 1;
+  const load = Number(entry.loadKg) > 0 ? ` @ ${entry.loadKg} kg` : "";
+  return `${sets} × ${amount} ${unitLabel(entry.unit, amount)}${load}`;
+}
+
+function suggestionText(suggestion) {
+  if (!suggestion || suggestion.action === "baseline") {
+    return language === "en" ? "Complete one session to establish a baseline." : "先完成一次，建立这个动作的基线。";
+  }
+  const target = formatPerformance(suggestion.target);
+  if (suggestion.action === "increase") {
+    return language === "en" ? `Two comfortable completions: try ${target} next time.` : `连续两次适中强度完成，下次可尝试 ${target}。`;
+  }
+  if (suggestion.action === "reduce") {
+    return language === "en" ? `Missed twice in a row: step back to ${target}.` : `连续两次未完成，建议回退到 ${target}。`;
+  }
+  const reason = suggestion.reason === "recent_effort_high"
+    ? (language === "en" ? "The last effort was high" : "上次强度较高")
+    : suggestion.reason === "recent_incomplete"
+      ? (language === "en" ? "The last session was incomplete" : "上次未完成")
+      : (language === "en" ? "Build consistency first" : "先稳定完成")
+  return language === "en" ? `${reason}: maintain ${target}.` : `${reason}，下次维持 ${target}。`;
+}
+
+function updateExerciseHistory(row) {
+  const element = row.querySelector(".exercise-history");
+  const key = exerciseKey(row.querySelector(".exercise-name").value);
+  const summary = exerciseProgress.find((item) => item.key === key);
+  if (!key || !summary) {
+    element.classList.add("hidden");
+    element.innerHTML = "";
+    return;
+  }
+  const recent = summary.recent28Days || {};
+  const rate = recent.sessions ? `${recent.completed}/${recent.sessions}` : "0/0";
+  const best = summary.best ? formatPerformance(summary.best) : "—";
+  element.innerHTML = `<span>${language === "en" ? "Last" : "上次"} <strong>${escapeHtml(summary.lastCompleted?.date || "—")}</strong> · ${escapeHtml(formatPerformance(summary.lastCompleted))}</span>
+    <span>${language === "en" ? "Last 4 weeks" : "近 4 周"} <strong>${escapeHtml(rate)}</strong> ${language === "en" ? "completed" : "次完成"} · ${language === "en" ? "best" : "最佳"} ${escapeHtml(best)}</span>
+    <span class="exercise-next ${escapeHtml(summary.suggestion?.action || "baseline")}">${escapeHtml(suggestionText(summary.suggestion))}</span>`;
+  element.classList.remove("hidden");
+}
+
+function refreshExerciseHistory() {
+  document.querySelectorAll(".exercise-row").forEach(updateExerciseHistory);
+}
+
 function addExerciseRow(exercise = {}) {
   const name = exercise.name || "";
   const amount = exercise.amount ?? exercise.duration ?? "";
@@ -124,7 +178,8 @@ function addExerciseRow(exercise = {}) {
       <label><span>${language === "en" ? "Unit" : "单位"}</span><select class="exercise-unit" aria-label="${language === "en" ? "Unit" : "单位"}"><option value="reps"${unit === "reps" ? " selected" : ""}>${language === "en" ? "reps" : "次"}</option><option value="minutes"${unit === "minutes" ? " selected" : ""}>${language === "en" ? "min" : "分钟"}</option><option value="seconds"${unit === "seconds" ? " selected" : ""}>${language === "en" ? "sec" : "秒"}</option></select></label>
       <label><span>${language === "en" ? "Load (kg)" : "负重（kg）"}</span><input class="exercise-load" type="number" min="0" max="1000" step="0.5" placeholder="—" value="${escapeHtml(exercise.loadKg ?? "")}" /></label>
     </div>
-    ${exercise.intensity || exercise.restSeconds !== "" ? `<p class="exercise-target">${language === "en" ? "Target" : "计划"}：${escapeHtml(exercise.intensity)}${exercise.restSeconds !== "" ? ` · ${language === "en" ? "rest" : "休息"} ${escapeHtml(exercise.restSeconds)} ${language === "en" ? "sec" : "秒"}` : ""}</p>` : ""}`;
+    ${exercise.intensity || exercise.restSeconds !== "" ? `<p class="exercise-target">${language === "en" ? "Target" : "计划"}：${escapeHtml(exercise.intensity)}${exercise.restSeconds !== "" ? ` · ${language === "en" ? "rest" : "休息"} ${escapeHtml(exercise.restSeconds)} ${language === "en" ? "sec" : "秒"}` : ""}</p>` : ""}
+    <div class="exercise-history hidden" aria-live="polite"></div>`;
   row.querySelector(".remove-exercise").addEventListener("click", () => {
     row.remove();
     if (!$("exercise-list").children.length) {
@@ -134,7 +189,9 @@ function addExerciseRow(exercise = {}) {
     syncPlanAdherenceFromExercises();
   });
   row.querySelector(".exercise-completed").addEventListener("change", syncPlanAdherenceFromExercises);
+  row.querySelector(".exercise-name").addEventListener("input", () => updateExerciseHistory(row));
   $("exercise-list").appendChild(row);
+  updateExerciseHistory(row);
 }
 
 function syncPlanAdherenceFromExercises() {
@@ -189,6 +246,7 @@ $("logout-button").addEventListener("click", async () => {
   await authRequest("/api/logout", {});
   records = [];
   profile = {};
+  exerciseProgress = [];
   renderHistory();
   renderProgress();
   showApp(null);
@@ -267,6 +325,7 @@ $("language-toggle").addEventListener("click", () => {
   renderHistory();
   renderProgress();
   renderSavedResponse();
+  refreshExerciseHistory();
 });
 
 function renderPhotoPreviews(message = "") {
@@ -396,6 +455,7 @@ function renderProvenance(provenance) {
     if (source.type === "daily_record") return `${language === "en" ? "record" : "记录"} ${source.date}`;
     if (source.type === "coach_output") return `${language === "en" ? "prior AI plan" : "既有 AI 计划"} ${source.date}`;
     if (source.type === "server_derived_stats") return `${language === "en" ? "server-calculated trend" : "服务端计算趋势"} ${source.period?.from || ""}–${source.period?.to || ""}`;
+    if (source.type === "server_derived_exercise_progress") return language === "en" ? "exercise progression history" : "动作渐进历史";
     if (source.type === "tool_daily_record") return `${language === "en" ? "extra record" : "补充记录"} ${source.date}`;
     if (source.type === "tool_recent_records") return language === "en" ? "extra recent records" : "补充近期记录";
     if (source.type === "tool_derived_weight_trend") return language === "en" ? "extra weight trend" : "补充体重趋势";
@@ -677,6 +737,18 @@ async function loadRecords() {
   records = Array.isArray(result.records) ? result.records : [];
   profile = result.profile?.confirmed || {};
   renderHistory(); renderProgress(); populateForms();
+  await loadExerciseProgress().catch((error) => setStatus(error.message, "error"));
+}
+
+async function loadExerciseProgress() {
+  const requestedDate = $("log-date").value;
+  const response = await fetch(`/api/exercise-progress?before=${encodeURIComponent(requestedDate)}`, { credentials: "same-origin" });
+  const result = await response.json().catch(() => ({}));
+  if (response.status === 401) return;
+  if (!response.ok) throw new Error(result.error || (language === "en" ? "Could not load exercise history" : "无法读取动作历史"));
+  if ($("log-date").value !== requestedDate) return;
+  exerciseProgress = Array.isArray(result.exercises) ? result.exercises : [];
+  refreshExerciseHistory();
 }
 
 async function runPhase({ phase, button, checkIn, images = [] }) {
@@ -748,7 +820,10 @@ $("evening-form").addEventListener("submit", async (event) => {
   } catch (error) { setStatus(error.message, "error"); }
 });
 
-$("log-date").addEventListener("change", populateForms);
+$("log-date").addEventListener("change", () => {
+  populateForms();
+  loadExerciseProgress().catch((error) => setStatus(error.message, "error"));
+});
 $("clear-plan").addEventListener("click", showEmptyCoach);
 switchPhase(activePhase, false);
 applyLanguage();

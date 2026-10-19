@@ -182,8 +182,11 @@ class RecordPersistenceTests(unittest.TestCase):
                 self.assertEqual(memory["previousDay"]["date"], "2026-09-21")
                 self.assertEqual(memory["recent14DayStats"]["recordCount"], 2)
                 self.assertEqual(memory["recent14DayStats"]["weight"]["changeKg"], -0.3)
+                self.assertEqual(memory["exerciseProgress"][0]["name"], "快走")
+                self.assertEqual(memory["exerciseProgress"][0]["suggestion"]["action"], "maintain")
                 self.assertEqual(provenance["dataStatus"], "complete")
                 self.assertIn("server_derived_stats", {source["type"] for source in provenance["sources"]})
+                self.assertIn("server_derived_exercise_progress", {source["type"] for source in provenance["sources"]})
 
     def test_resubmitting_one_phase_invalidates_only_that_ai_output(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -218,6 +221,47 @@ class RecordPersistenceTests(unittest.TestCase):
         self.assertEqual(comparison["completionRate"], 0.5)
         self.assertEqual(comparison["items"][0]["quantityRatio"], 0.8)
         self.assertEqual(comparison["items"][1]["quantityRatio"], 0)
+
+    def test_exercise_progress_recommends_small_increase_after_two_moderate_completions(self):
+        records = [
+            {"date": "2026-09-20", "midday": {"effort": "3", "exercises": [
+                {"name": " Goblet Squat ", "sets": "3", "amount": "10", "unit": "reps", "loadKg": "20", "completed": True},
+            ]}},
+            {"date": "2026-09-27", "midday": {"effort": "3", "exercises": [
+                {"name": "goblet-squat", "sets": "3", "amount": "10", "unit": "reps", "loadKg": "20", "completed": True},
+            ]}},
+        ]
+
+        result = server.exercise_progress(records, before_date="2026-10-01")
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["recent28Days"]["completionRate"], 1.0)
+        self.assertEqual(result[0]["lastCompleted"]["date"], "2026-09-27")
+        self.assertEqual(result[0]["suggestion"]["action"], "increase")
+        self.assertEqual(result[0]["suggestion"]["target"]["loadKg"], 20.5)
+
+    def test_exercise_progress_steps_back_after_two_incomplete_sessions(self):
+        records = [
+            {"date": "2026-09-10", "midday": {"effort": "3", "exercises": [
+                {"name": "深蹲", "sets": 3, "amount": 8, "unit": "reps", "loadKg": 20, "completed": True},
+            ]}},
+            {"date": "2026-09-17", "midday": {"effort": "5", "exercises": [
+                {"name": "深 蹲", "sets": 3, "amount": 8, "unit": "reps", "loadKg": 20, "completed": False},
+            ]}},
+            {"date": "2026-09-24", "midday": {"effort": "5", "exercises": [
+                {"name": "深蹲", "sets": 3, "amount": 8, "unit": "reps", "loadKg": 20, "completed": False},
+            ]}},
+            {"date": "2026-10-02", "midday": {"effort": "2", "exercises": [
+                {"name": "深蹲", "sets": 3, "amount": 8, "unit": "reps", "loadKg": 22, "completed": True},
+            ]}},
+        ]
+
+        result = server.exercise_progress(records, before_date="2026-10-01")
+
+        self.assertEqual(result[0]["recent28Days"], {"sessions": 3, "completed": 1, "completionRate": 0.33})
+        self.assertEqual(result[0]["suggestion"]["action"], "reduce")
+        self.assertEqual(result[0]["suggestion"]["target"]["loadKg"], 19.0)
+        self.assertEqual(result[0]["last"]["date"], "2026-09-24")
 
     def test_startup_migrates_legacy_mixed_records(self):
         with tempfile.TemporaryDirectory() as directory:

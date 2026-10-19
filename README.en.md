@@ -14,6 +14,8 @@ After training, users log each exercise and its actual duration, then indicate w
 
 Morning workouts are shown as structured exercises with sets, reps or duration, target intensity, and rest time. Users can import the plan into the workout log, check off exercises while training, and adjust actual sets, amounts, and load; the post-workout coach compares the plan with what was completed.
 
+When users enter or import a previously logged exercise, the page shows the last completed performance, four-week completion rate, and recent best. Progression guidance is calculated deterministically by the server: load, reps, or duration increases only after two moderate-effort completions; two consecutive misses trigger a step-back suggestion; other cases maintain the previous target. These results are also fixed evidence for the next morning workout plan.
+
 The progress section supports 7-, 14-, and 30-day views of the weight moving average, sleep and energy trends, workout days and minutes, stage completion, and the current logging streak. Deterministic comparisons between the earlier and later halves of the period highlight one recent win and one next focus without another model call.
 
 In the evening, users add meals, food photos, and digestion information. On the following morning, the coach reviews the completed day, plan adherence, and recent trends, then provides a score from 0 to 100 with a short explanation.
