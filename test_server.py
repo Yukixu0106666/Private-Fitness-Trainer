@@ -184,9 +184,11 @@ class RecordPersistenceTests(unittest.TestCase):
                 self.assertEqual(memory["recent14DayStats"]["weight"]["changeKg"], -0.3)
                 self.assertEqual(memory["exerciseProgress"][0]["name"], "快走")
                 self.assertEqual(memory["exerciseProgress"][0]["suggestion"]["action"], "maintain")
+                self.assertEqual(memory["weeklyReview"]["period"]["start"], "2026-09-21")
                 self.assertEqual(provenance["dataStatus"], "complete")
                 self.assertIn("server_derived_stats", {source["type"] for source in provenance["sources"]})
                 self.assertIn("server_derived_exercise_progress", {source["type"] for source in provenance["sources"]})
+                self.assertIn("server_derived_weekly_review", {source["type"] for source in provenance["sources"]})
 
     def test_resubmitting_one_phase_invalidates_only_that_ai_output(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -262,6 +264,59 @@ class RecordPersistenceTests(unittest.TestCase):
         self.assertEqual(result[0]["suggestion"]["action"], "reduce")
         self.assertEqual(result[0]["suggestion"]["target"]["loadKg"], 19.0)
         self.assertEqual(result[0]["last"]["date"], "2026-09-24")
+
+    def test_weekly_review_compares_weeks_and_recommends_next_week(self):
+        def workout(date, name, minutes=30, effort=3, sleep=7.5):
+            return {
+                "date": date,
+                "morning": {"sleep": sleep, "energy": 4},
+                "plan": {"training": {"items": [{"name": name, "sets": 3, "amount": 10, "unit": "reps"}]}},
+                "midday": {"effort": effort, "totalDuration": minutes, "exercises": [
+                    {"name": name, "sets": 3, "amount": 10, "unit": "reps", "completed": True, "planIndex": 0},
+                ]},
+                "evening": {"food": "三餐均衡"},
+            }
+
+        records = [
+            workout("2026-10-07", "快走", 30),
+            workout("2026-10-12", "深蹲", 35),
+            workout("2026-10-14", "俯卧撑", 25),
+            workout("2026-10-17", "划船", 40),
+            {"date": "2026-10-18", "morning": {"sleep": 8}, "plan": {"training": {"items": [
+                {"name": "平板支撑", "sets": 3, "amount": 30, "unit": "seconds"},
+            ]}}},
+        ]
+
+        review = server.weekly_review(records, "2026-10-18")
+
+        self.assertEqual(review["period"]["start"], "2026-10-12")
+        self.assertEqual(review["metrics"]["workoutDays"], 3)
+        self.assertEqual(review["metrics"]["workoutMinutes"], 100)
+        self.assertEqual(review["metrics"]["plannedItems"], 3)
+        self.assertEqual(review["metrics"]["planCompletionRate"], 1.0)
+        self.assertEqual(review["comparison"]["workoutDays"], 2)
+        self.assertEqual(review["win"], "more_workouts")
+        self.assertEqual(review["nextWeek"]["targetWorkoutDays"], 4)
+        self.assertEqual(review["nextWeek"]["intensity"], "progress")
+        self.assertEqual(
+            {item["group"] for item in review["metrics"]["exerciseDistribution"]},
+            {"lowerBody", "push", "pull"},
+        )
+
+    def test_weekly_review_reduces_intensity_when_recovery_is_low(self):
+        records = [{
+            "date": "2026-10-13",
+            "morning": {"sleep": 5.5, "energy": 2},
+            "midday": {"effort": 5, "totalDuration": 20, "exercises": [
+                {"name": "深蹲", "sets": 3, "amount": 8, "unit": "reps", "completed": True},
+            ]},
+        }]
+
+        review = server.weekly_review(records, "2026-10-18")
+
+        self.assertEqual(review["nextWeek"]["frequency"], "recover")
+        self.assertEqual(review["nextWeek"]["intensity"], "reduce")
+        self.assertIn("sleep", review["nextWeek"]["focus"])
 
     def test_startup_migrates_legacy_mixed_records(self):
         with tempfile.TemporaryDirectory() as directory:

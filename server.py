@@ -1147,6 +1147,171 @@ def derived_stats(records):
     }
 
 
+MUSCLE_GROUP_PATTERNS = {
+    "lowerBody": ("深蹲", "弓步", "硬拉", "腿举", "臀桥", "臀推", "提踵", "squat", "lunge", "deadlift", "leg press", "hip thrust", "glute bridge", "calf"),
+    "push": ("卧推", "俯卧撑", "肩推", "推举", "飞鸟", "臂屈伸", "bench press", "push-up", "pushup", "shoulder press", "overhead press", "chest fly", "dip"),
+    "pull": ("引体", "划船", "下拉", "面拉", "弯举", "pull-up", "pullup", "row", "lat pulldown", "face pull", "curl"),
+    "core": ("平板", "卷腹", "仰卧起坐", "俄罗斯转体", "鸟狗", "死虫", "plank", "crunch", "sit-up", "russian twist", "bird dog", "dead bug"),
+    "cardio": ("走", "跑", "单车", "骑行", "游泳", "跳绳", "椭圆机", "划船机", "walk", "run", "jog", "cycle", "bike", "swim", "jump rope", "elliptical", "rowing machine"),
+    "mobility": ("拉伸", "瑜伽", "活动度", "泡沫轴", "stretch", "yoga", "mobility", "foam roll"),
+}
+
+
+def exercise_group(name):
+    normalized = unicodedata.normalize("NFKC", str(name or "")).casefold()
+    if "划船机" in normalized or "rowing machine" in normalized:
+        return "cardio"
+    for group, patterns in MUSCLE_GROUP_PATTERNS.items():
+        if any(pattern in normalized for pattern in patterns):
+            return group
+    return "other"
+
+
+def _average_or_none(values):
+    return round(sum(values) / len(values), 2) if values else None
+
+
+def _weekly_metrics(records):
+    ordered = sorted(records, key=lambda item: item.get("date", ""))
+    sleep_values, energy_values, effort_values, weights = [], [], [], []
+    workout_days = workout_minutes = planned_items = completed_items = 0
+    nutrition_days = stage_count = 0
+    distribution = {}
+    for record in ordered:
+        morning = record.get("morning") or {}
+        midday = record.get("midday") or {}
+        evening = record.get("evening") or {}
+        stage_count += sum(bool(record.get(stage)) for stage in ("morning", "midday", "evening"))
+        sleep = numeric(morning.get("sleep"))
+        energy = numeric(morning.get("energy"))
+        weight = numeric(morning.get("weight"))
+        effort = numeric(midday.get("effort"))
+        if sleep is not None:
+            sleep_values.append(sleep)
+        if energy is not None:
+            energy_values.append(energy)
+        if weight is not None:
+            weights.append(weight)
+        exercises = midday.get("exercises") if isinstance(midday.get("exercises"), list) else []
+        completed_exercises = [item for item in exercises if isinstance(item, dict) and item.get("completed", True) is True]
+        minutes = numeric(midday.get("totalDuration")) or 0
+        if completed_exercises or minutes > 0:
+            workout_days += 1
+            if effort is not None:
+                effort_values.append(effort)
+        workout_minutes += max(0, round(minutes))
+        for exercise in completed_exercises:
+            group = exercise_group(exercise.get("name"))
+            distribution[group] = distribution.get(group, 0) + 1
+        plan_items = ((record.get("plan") or {}).get("training") or {}).get("items") or []
+        comparison = compare_training_plan(plan_items, exercises) if isinstance(record.get("midday"), dict) else None
+        if comparison:
+            planned_items += comparison["plannedCount"]
+            completed_items += comparison["completedCount"]
+        if isinstance(evening.get("food"), str) and evening["food"].strip():
+            nutrition_days += 1
+    return {
+        "recordedDays": len(ordered),
+        "completedStages": stage_count,
+        "workoutDays": workout_days,
+        "workoutMinutes": workout_minutes,
+        "plannedItems": planned_items,
+        "completedItems": completed_items,
+        "planCompletionRate": round(completed_items / planned_items, 2) if planned_items else None,
+        "averageSleepHours": _average_or_none(sleep_values),
+        "averageEnergy": _average_or_none(energy_values),
+        "averageEffort": _average_or_none(effort_values),
+        "weightChangeKg": round(weights[-1] - weights[0], 2) if len(weights) > 1 else None,
+        "nutritionLoggedDays": nutrition_days,
+        "exerciseDistribution": [
+            {"group": group, "count": count}
+            for group, count in sorted(distribution.items(), key=lambda item: (-item[1], item[0]))
+        ],
+    }
+
+
+def weekly_review(records, anchor_date):
+    validate_date(anchor_date)
+    anchor = datetime.strptime(anchor_date, "%Y-%m-%d").date()
+    start = anchor - timedelta(days=anchor.weekday())
+    end = start + timedelta(days=6)
+    previous_start, previous_end = start - timedelta(days=7), start - timedelta(days=1)
+
+    def in_period(record, period_start, period_end):
+        date = record.get("date", "")
+        return period_start.isoformat() <= date <= period_end.isoformat()
+
+    current = _weekly_metrics([record for record in records if in_period(record, start, end)])
+    previous = _weekly_metrics([record for record in records if in_period(record, previous_start, previous_end)])
+    rate = current["planCompletionRate"]
+    sleep = current["averageSleepHours"]
+    energy = current["averageEnergy"]
+    effort = current["averageEffort"]
+
+    if current["workoutDays"] == 0:
+        target_days, frequency = 2, "start"
+    elif (effort is not None and effort >= 4) or (sleep is not None and sleep < 6.5) or (energy is not None and energy < 3):
+        target_days, frequency = max(2, min(current["workoutDays"], 4)), "recover"
+    elif rate is not None and rate >= 0.8 and current["workoutDays"] < 5:
+        target_days, frequency = current["workoutDays"] + 1, "increase"
+    else:
+        target_days, frequency = max(2, min(current["workoutDays"], 5)), "maintain"
+
+    if (effort is not None and effort >= 4) or (sleep is not None and sleep < 6.5) or (energy is not None and energy < 3):
+        intensity = "reduce"
+    elif rate is not None and rate >= 0.8 and effort is not None and effort <= 3:
+        intensity = "progress"
+    else:
+        intensity = "maintain"
+
+    distribution = current["exerciseDistribution"]
+    total_exercises = sum(item["count"] for item in distribution)
+    dominant_share = distribution[0]["count"] / total_exercises if total_exercises and distribution else 0
+    focus = []
+    if sleep is not None and sleep < 7:
+        focus.append("sleep")
+    if rate is not None and rate < 0.7:
+        focus.append("plan_completion")
+    if current["workoutDays"] < 2:
+        focus.append("training_consistency")
+    if dominant_share >= 0.7 and total_exercises >= 4:
+        focus.append("movement_balance")
+    if current["recordedDays"] and current["nutritionLoggedDays"] < math.ceil(current["recordedDays"] / 2):
+        focus.append("nutrition_logging")
+    if not focus:
+        focus.append("keep_routine")
+
+    if current["workoutDays"] > previous["workoutDays"]:
+        win = "more_workouts"
+    elif rate is not None and rate >= 0.8:
+        win = "high_completion"
+    elif sleep is not None and sleep >= 7:
+        win = "good_sleep"
+    elif current["recordedDays"] >= 5:
+        win = "consistent_logging"
+    else:
+        win = "baseline_built"
+
+    return {
+        "period": {"start": start.isoformat(), "end": end.isoformat(), "isCurrentWeek": start <= now().date() <= end},
+        "metrics": current,
+        "previousWeek": previous,
+        "comparison": {
+            "workoutDays": current["workoutDays"] - previous["workoutDays"],
+            "workoutMinutes": current["workoutMinutes"] - previous["workoutMinutes"],
+            "averageSleepHours": round(sleep - previous["averageSleepHours"], 2) if sleep is not None and previous["averageSleepHours"] is not None else None,
+            "averageEnergy": round(energy - previous["averageEnergy"], 2) if energy is not None and previous["averageEnergy"] is not None else None,
+        },
+        "win": win,
+        "nextWeek": {
+            "targetWorkoutDays": target_days,
+            "frequency": frequency,
+            "intensity": intensity,
+            "focus": focus[:3],
+        },
+    }
+
+
 def record_embedding_document(record):
     compact = compact_record(record)
     return json.dumps(compact, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -1389,6 +1554,7 @@ def build_memory_context(user_id, check_in, trace=None):
     recent_facts = history_facts[:14]
     stats = derived_stats(recent_facts)
     training_progress = exercise_progress(history_facts, date)[:20]
+    weekly = weekly_review(merge_outputs(history_facts, coach_outputs(user_id)), date)
     prior = record_by_date(user_id, previous_date(date)) if phase == "morning" else None
     semantic_matches = []
     vector_status = {"enabled": vector_store_enabled(), "indexed": 0, "retrieved": 0}
@@ -1431,6 +1597,12 @@ def build_memory_context(user_id, check_in, trace=None):
             "exerciseCount": len(training_progress),
             "windowDays": 28,
         })
+    if weekly["metrics"]["recordedDays"]:
+        sources.append({
+            "id": f"derived:weekly_review:{weekly['period']['start']}:{weekly['period']['end']}",
+            "type": "server_derived_weekly_review",
+            "period": weekly["period"],
+        })
     if semantic_matches:
         sources.append({
             "id": f"hybrid_pgvector:{date}",
@@ -1470,6 +1642,7 @@ def build_memory_context(user_id, check_in, trace=None):
         "previousDay": compact_record(prior) if prior else None,
         "recent14DayStats": stats,
         "exerciseProgress": training_progress,
+        "weeklyReview": weekly,
         "semanticMatches": [json.loads(item["content"]) for item in semantic_matches],
         "vectorRetrieval": vector_status,
         "provenance": provenance,
@@ -1647,7 +1820,7 @@ def prompt_for(body, memory):
     phase = check_in.get("phase", "morning")
     language = "English" if body.get("language") == "en" else "Chinese"
     phase_tasks = {
-        "morning": """这是早间教练。根据今早体重、睡眠、精力、酸痛、可用时间、最近14天趋势和前一天完整记录，制定今天三餐与运动计划。若 exerciseProgress 中有同名动作，应优先采用其确定性 suggestion.target，不得跳过维持或回退建议擅自加量。若有前一天记录，用模型综合完成度、运动量、饮食结构、排便、恢复和目标给前一天打0-100分；评分必须解释依据，不得因为减重越多就机械加分。若没有前一天记录，score必须为null。生成 4-6 个结构化训练项目：sets 是组数；amount 是每组次数或时长；unit 只能是 reps、minutes 或 seconds；intensity 是用户能理解的目标强度；restSeconds 是组间休息秒数。有氧连续训练使用 sets=1、amount=总时长、unit=minutes。输出严格JSON：
+        "morning": """这是早间教练。根据今早体重、睡眠、精力、酸痛、可用时间、最近14天趋势和前一天完整记录，制定今天三餐与运动计划。尊重 weeklyReview.nextWeek 的频率、强度和重点调整；若 exerciseProgress 中有同名动作，应优先采用其确定性 suggestion.target，不得跳过维持或回退建议擅自加量。若有前一天记录，用模型综合完成度、运动量、饮食结构、排便、恢复和目标给前一天打0-100分；评分必须解释依据，不得因为减重越多就机械加分。若没有前一天记录，score必须为null。生成 4-6 个结构化训练项目：sets 是组数；amount 是每组次数或时长；unit 只能是 reps、minutes 或 seconds；intensity 是用户能理解的目标强度；restSeconds 是组间休息秒数。有氧连续训练使用 sets=1、amount=总时长、unit=minutes。输出严格JSON：
 {"title":"今日重点，不超过20字","summary":"两句以内","previousDayEvaluation":{"date":"被评分日期或空字符串","score":null,"summary":"评分说明","wins":["优点"],"improve":["改进点"]},"meals":{"breakfast":"具体早餐","lunch":"具体午餐","dinner":"具体晚餐","principles":"份量、蛋白质和饮水原则"},"training":{"loadLabel":"训练强度","items":[{"name":"动作名称","sets":3,"amount":10,"unit":"reps","intensity":"保留2-3次余力","restSeconds":60}]},"recovery":"安全和恢复提醒"}""",
         "midday": """这是训练后教练。比较早间结构化训练建议与用户实际运动、组数、每组数量、单位、负重、完成勾选、主观强度和完成程度；planIndex 对应早间 training.items 的位置。unit 可为 minutes（分钟）、seconds（秒）或 reps（次），totalDuration 只统计已完成的分钟项目。立即生成针对实际使用肌群的拉伸和冷身建议。疼痛时不得建议强行拉伸。输出严格JSON：
 {"title":"训练后重点，不超过20字","summary":"对本次完成情况的简短反馈","stretch":{"duration":"总拉伸时长","items":["4-6条含部位、动作和保持时间的拉伸"],"safety":"安全提醒"}}""",
@@ -1659,7 +1832,7 @@ def prompt_for(body, memory):
     for image in images[:4]:
         if isinstance(image, str) and image.startswith("data:image/"):
             content.append({"type": "image_url", "image_url": {"url": image, "detail": "low"}})
-    system = f"""你是一名谨慎的健身教练 Agent。服务端已按阶段提供 fixedMemory，其中 confirmedProfile 是用户确认信息；currentDay 和 previousDay 的 morning、midday、evening 是用户事实，assignedTraining 是单独保存的 AI 计划，只能用于比较而不能视为实际完成；recent14DayStats 与 exerciseProgress 是服务端确定性计算结果；semanticMatches 是经过用户隔离、日期过滤、向量召回与重排的历史事实；provenance 列出固定检索来源。不得猜测固定来源或成功工具结果中没有的数据。工具只用于可选补充，无需为了回答而调用。必须只输出任务指定结构的有效 JSON，不要 Markdown。所有面向用户的JSON值必须使用{language}。建议应具体、温和、可执行；不得诊断疾病。评分属于基于历史记录的模型估计而非医学结论，并应避免体重数字偏见。"""
+    system = f"""你是一名谨慎的健身教练 Agent。服务端已按阶段提供 fixedMemory，其中 confirmedProfile 是用户确认信息；currentDay 和 previousDay 的 morning、midday、evening 是用户事实，assignedTraining 是单独保存的 AI 计划，只能用于比较而不能视为实际完成；recent14DayStats、exerciseProgress 与 weeklyReview 是服务端确定性计算结果；semanticMatches 是经过用户隔离、日期过滤、向量召回与重排的历史事实；provenance 列出固定检索来源。不得猜测固定来源或成功工具结果中没有的数据。工具只用于可选补充，无需为了回答而调用。必须只输出任务指定结构的有效 JSON，不要 Markdown。所有面向用户的JSON值必须使用{language}。建议应具体、温和、可执行；不得诊断疾病。评分属于基于历史记录的模型估计而非医学结论，并应避免体重数字偏见。"""
     return [{"role": "system", "content": system}, {"role": "user", "content": content}]
 
 
@@ -1796,7 +1969,7 @@ class Handler(SimpleHTTPRequestHandler):
         params = parse_qs(urlparse(self.path).query)
         if path == "/api/me":
             self.send_json(200, {"user": self.current_user()})
-        elif path in ("/api/records", "/api/exercise-progress", "/api/metrics", "/api/traces", "/api/export"):
+        elif path in ("/api/records", "/api/exercise-progress", "/api/weekly-review", "/api/metrics", "/api/traces", "/api/export"):
             user = self.current_user()
             if not user:
                 self.send_json(401, {"error": "请先登录"})
@@ -1808,6 +1981,14 @@ class Handler(SimpleHTTPRequestHandler):
                     self.send_json(400, {"error": str(error)})
                     return
                 self.send_json(200, {"exercises": exercise_progress(fact_records(user["id"]), before)})
+            elif path == "/api/weekly-review":
+                date = params.get("date", [now().date().isoformat()])[0]
+                try:
+                    review = weekly_review(list_records(user["id"]), date)
+                except ValueError as error:
+                    self.send_json(400, {"error": str(error)})
+                    return
+                self.send_json(200, {"review": review})
             elif path == "/api/metrics":
                 self.send_json(200, trace_metrics(user["id"], params.get("limit", ["100"])[0]))
             elif path == "/api/traces":

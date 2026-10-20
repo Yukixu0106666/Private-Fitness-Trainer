@@ -147,6 +147,18 @@
           </div>
           <div id="progress-insights" class="progress-insights"></div>
         </div>
+        <section class="weekly-review" aria-labelledby="weekly-review-title">
+          <div class="weekly-heading">
+            <div><span class="section-kicker">WEEKLY REVIEW</span><h3 id="weekly-review-title">每周复盘与下周调整</h3><small id="weekly-period"></small></div>
+            <div class="week-toggle" role="group" aria-label="周报时间范围"><button type="button" data-week-offset="-1">上一周</button><button class="active" type="button" data-week-offset="0">本周</button></div>
+          </div>
+          <div id="weekly-loading" class="weekly-empty">正在整理本周记录…</div>
+          <div id="weekly-body" class="hidden">
+            <div id="weekly-metrics" class="weekly-metrics"></div>
+            <div class="weekly-grid"><div><h4>训练分布</h4><div id="weekly-distribution"></div></div><div><h4>本周收获</h4><p id="weekly-win"></p></div></div>
+            <div class="next-week"><span>下周调整</span><div id="next-week-actions"></div></div>
+          </div>
+        </section>
       </section>
 
       <section class="card history-card hidden" id="history-content">

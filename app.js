@@ -10,6 +10,8 @@ let photoPreviewUrls = [];
 let records = [];
 let profile = {};
 let exerciseProgress = [];
+let weeklyReview = null;
+let weeklyOffset = 0;
 let registerMode = false;
 let progressDays = 14;
 let activePhase = today.getHours() < 11 ? "morning" : today.getHours() < 18 ? "midday" : "evening";
@@ -48,7 +50,9 @@ const enText = {
   "输入密码确认": "Enter your password to confirm", "可以从早上的计划一键带入，再勾选和修改实际完成量。": "Import the morning plan, then check off and adjust what you completed.",
   "进度趋势": "Progress trends", "体重趋势": "Weight trend", "圆点为记录值，线条为移动平均": "Dots are entries; the line is a moving average",
   "恢复状态": "Recovery", "睡眠与精力变化": "Sleep and energy trends", "完成打卡后，这里会显示你的趋势": "Your trends will appear after you check in",
-  "连续记录几天，就能看见体重、恢复和训练变化。": "Log a few days to see changes in weight, recovery, and training."
+  "连续记录几天，就能看见体重、恢复和训练变化。": "Log a few days to see changes in weight, recovery, and training.",
+  "每周复盘与下周调整": "Weekly review and next-week adjustments", "上一周": "Prior week", "本周": "This week",
+  "正在整理本周记录…": "Preparing weekly review…", "训练分布": "Exercise distribution", "本周收获": "This week's win", "下周调整": "Next-week adjustments"
 };
 const originalText = new WeakMap();
 const originalPlaceholder = new WeakMap();
@@ -247,6 +251,7 @@ $("logout-button").addEventListener("click", async () => {
   records = [];
   profile = {};
   exerciseProgress = [];
+  weeklyReview = null;
   renderHistory();
   renderProgress();
   showApp(null);
@@ -326,6 +331,7 @@ $("language-toggle").addEventListener("click", () => {
   renderProgress();
   renderSavedResponse();
   refreshExerciseHistory();
+  renderWeeklyReview();
 });
 
 function renderPhotoPreviews(message = "") {
@@ -456,6 +462,7 @@ function renderProvenance(provenance) {
     if (source.type === "coach_output") return `${language === "en" ? "prior AI plan" : "既有 AI 计划"} ${source.date}`;
     if (source.type === "server_derived_stats") return `${language === "en" ? "server-calculated trend" : "服务端计算趋势"} ${source.period?.from || ""}–${source.period?.to || ""}`;
     if (source.type === "server_derived_exercise_progress") return language === "en" ? "exercise progression history" : "动作渐进历史";
+    if (source.type === "server_derived_weekly_review") return language === "en" ? "weekly review" : "每周复盘";
     if (source.type === "tool_daily_record") return `${language === "en" ? "extra record" : "补充记录"} ${source.date}`;
     if (source.type === "tool_recent_records") return language === "en" ? "extra recent records" : "补充近期记录";
     if (source.type === "tool_derived_weight_trend") return language === "en" ? "extra weight trend" : "补充体重趋势";
@@ -688,6 +695,102 @@ document.querySelectorAll(".range-toggle button").forEach((button) => button.add
   renderProgress();
 }));
 
+function weeklyAnchorDate() {
+  const anchor = new Date(today);
+  anchor.setDate(anchor.getDate() + weeklyOffset * 7);
+  return isoDate(anchor);
+}
+
+function signedDelta(value, suffix = "") {
+  if (value === null || value === undefined) return "";
+  const number = Number(value);
+  if (!Number.isFinite(number) || number === 0) return language === "en" ? "same as prior week" : "与上周相同";
+  return `${number > 0 ? "+" : ""}${Number.isInteger(number) ? number : number.toFixed(1)}${suffix} ${language === "en" ? "vs prior week" : "较上周"}`;
+}
+
+function weeklyWinText(code, metrics) {
+  const map = language === "en" ? {
+    more_workouts: "You trained on more days than the prior week.", high_completion: "You completed at least 80% of planned exercises.",
+    good_sleep: "Average sleep reached seven hours.", consistent_logging: "You logged at least five days.", baseline_built: "You established a usable baseline for the week.",
+  } : {
+    more_workouts: "训练天数比上周更多。", high_completion: "计划动作完成率达到 80% 以上。",
+    good_sleep: "平均睡眠达到 7 小时。", consistent_logging: "本周至少记录了 5 天。", baseline_built: "已为本周建立可用的记录基线。",
+  };
+  if (!metrics.recordedDays) return language === "en" ? "No entries yet for this week." : "这一周还没有记录。";
+  return map[code] || map.baseline_built;
+}
+
+function weeklyAdjustmentText(next) {
+  if (!next) return [];
+  const frequency = language === "en"
+    ? `Frequency: aim for ${next.targetWorkoutDays} workout days${next.frequency === "increase" ? ", one more than this week" : next.frequency === "recover" ? ", with recovery taking priority" : ""}.`
+    : `频率：下周目标 ${next.targetWorkoutDays} 个训练日${next.frequency === "increase" ? "，比本周增加 1 天" : next.frequency === "recover" ? "，以恢复为先" : ""}。`;
+  const intensityMap = language === "en"
+    ? { reduce: "Intensity: reduce load or volume by about 5–10%.", progress: "Intensity: progress only exercises marked ready, using their suggested targets.", maintain: "Intensity: keep the current load and stabilize completion." }
+    : { reduce: "强度：负重或总量降低约 5–10%。", progress: "强度：仅对已达到进阶条件的动作按建议目标加量。", maintain: "强度：保持当前负荷，先稳定完成。" };
+  const focusMap = language === "en" ? {
+    sleep: "Recovery: move bedtime earlier or make it more consistent.", plan_completion: "Execution: simplify the plan and improve completion first.",
+    training_consistency: "Consistency: schedule two manageable sessions first.", movement_balance: "Balance: add movements outside the dominant training category.",
+    nutrition_logging: "Nutrition: complete food notes on at least half of logged days.", keep_routine: "Focus: keep the current routine and record actual completion accurately.",
+  } : {
+    sleep: "恢复：优先提前或稳定入睡时间。", plan_completion: "执行：先简化计划，提高动作完成率。",
+    training_consistency: "连续性：先固定两次容易完成的训练。", movement_balance: "平衡：补充当前主要训练类别之外的动作。",
+    nutrition_logging: "饮食：至少在一半的记录日完成饮食复盘。", keep_routine: "重点：保持当前节奏，继续准确记录实际完成量。",
+  };
+  return [frequency, intensityMap[next.intensity] || intensityMap.maintain, ...(next.focus || []).map((code) => focusMap[code]).filter(Boolean)];
+}
+
+function renderWeeklyReview() {
+  document.querySelectorAll(".week-toggle button").forEach((button) => {
+    const offset = Number(button.dataset.weekOffset);
+    button.classList.toggle("active", offset === weeklyOffset);
+    button.textContent = language === "en" ? (offset ? "Prior week" : "This week") : (offset ? "上一周" : "本周");
+  });
+  document.querySelector(".week-toggle").setAttribute("aria-label", language === "en" ? "Weekly review period" : "周报时间范围");
+  if (!weeklyReview) return;
+  const { period, metrics, comparison, nextWeek } = weeklyReview;
+  $("weekly-loading").classList.add("hidden");
+  $("weekly-body").classList.remove("hidden");
+  $("weekly-review-title").textContent = language === "en" ? "Weekly review and next-week adjustments" : "每周复盘与下周调整";
+  $("weekly-period").textContent = `${period.start} — ${period.end}${weeklyOffset === 0 ? (language === "en" ? " · week to date" : " · 截至今天") : ""}`;
+  const completion = metrics.planCompletionRate === null ? "—" : `${Math.round(metrics.planCompletionRate * 100)}%`;
+  $("weekly-metrics").innerHTML = [
+    [language === "en" ? "Workout days" : "训练天数", metrics.workoutDays, signedDelta(comparison.workoutDays, language === "en" ? " days" : " 天")],
+    [language === "en" ? "Minutes" : "训练时长", metrics.workoutMinutes, signedDelta(comparison.workoutMinutes, language === "en" ? " min" : " 分钟")],
+    [language === "en" ? "Plan completion" : "计划完成率", completion, `${metrics.completedItems}/${metrics.plannedItems || 0}`],
+    [language === "en" ? "Recovery" : "恢复", metrics.averageSleepHours === null ? "—" : `${metrics.averageSleepHours.toFixed(1)}h`, metrics.averageEnergy === null ? "—" : `${language === "en" ? "Energy" : "精力"} ${metrics.averageEnergy.toFixed(1)}/5`],
+  ].map(([label, value, detail]) => `<div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong><small>${escapeHtml(detail)}</small></div>`).join("");
+  const groupLabels = language === "en"
+    ? { lowerBody: "Lower body", push: "Push", pull: "Pull", core: "Core", cardio: "Cardio", mobility: "Mobility", other: "Other" }
+    : { lowerBody: "下肢", push: "推力", pull: "拉力", core: "核心", cardio: "有氧", mobility: "活动度", other: "其他" };
+  $("weekly-distribution").innerHTML = metrics.exerciseDistribution.length
+    ? metrics.exerciseDistribution.map((item) => `<span class="distribution-chip">${escapeHtml(groupLabels[item.group] || item.group)} <strong>${item.count}</strong></span>`).join("")
+    : `<span class="muted">${language === "en" ? "No completed exercises logged" : "还没有完成的训练动作"}</span>`;
+  $("weekly-win").textContent = weeklyWinText(weeklyReview.win, metrics);
+  $("next-week-actions").innerHTML = weeklyAdjustmentText(nextWeek).map((item) => `<p>${escapeHtml(item)}</p>`).join("");
+}
+
+async function loadWeeklyReview() {
+  const requestedOffset = weeklyOffset;
+  $("weekly-loading").textContent = language === "en" ? "Preparing weekly review…" : "正在整理本周记录…";
+  $("weekly-loading").classList.remove("hidden");
+  $("weekly-body").classList.add("hidden");
+  const response = await fetch(`/api/weekly-review?date=${encodeURIComponent(weeklyAnchorDate())}`, { credentials: "same-origin" });
+  const result = await response.json().catch(() => ({}));
+  if (response.status === 401) return;
+  if (!response.ok) throw new Error(result.error || (language === "en" ? "Could not load weekly review" : "无法读取每周复盘"));
+  if (requestedOffset !== weeklyOffset) return;
+  weeklyReview = result.review;
+  renderWeeklyReview();
+}
+
+document.querySelectorAll(".week-toggle button").forEach((button) => button.addEventListener("click", () => {
+  weeklyOffset = Number(button.dataset.weekOffset);
+  weeklyReview = null;
+  renderWeeklyReview();
+  loadWeeklyReview().catch((error) => setStatus(error.message, "error"));
+}));
+
 $("history-list").addEventListener("click", async (event) => {
   const button = event.target.closest(".delete-record");
   if (!button) return;
@@ -701,6 +804,10 @@ $("history-list").addEventListener("click", async (event) => {
     renderHistory();
     renderProgress();
     populateForms();
+    await Promise.all([
+      loadExerciseProgress().catch((error) => setStatus(error.message, "error")),
+      loadWeeklyReview().catch((error) => setStatus(error.message, "error")),
+    ]);
     setDataActionStatus(language === "en" ? `Record for ${date} deleted.` : `${date} 的记录已删除。`);
   } catch (error) {
     button.disabled = false;
@@ -737,7 +844,10 @@ async function loadRecords() {
   records = Array.isArray(result.records) ? result.records : [];
   profile = result.profile?.confirmed || {};
   renderHistory(); renderProgress(); populateForms();
-  await loadExerciseProgress().catch((error) => setStatus(error.message, "error"));
+  await Promise.all([
+    loadExerciseProgress().catch((error) => setStatus(error.message, "error")),
+    loadWeeklyReview().catch((error) => setStatus(error.message, "error")),
+  ]);
 }
 
 async function loadExerciseProgress() {
@@ -784,6 +894,7 @@ async function runPhase({ phase, button, checkIn, images = [] }) {
     const telemetry = observed ? ` · ${(Number(observed.durationMs) / 1000).toFixed(1)}s${observed.estimatedCostUsd === null ? "" : ` · $${Number(observed.estimatedCostUsd).toFixed(4)}`}` : "";
     renderCoachResponse(response, phase); renderProvenance(result.provenance); setStatus((language === "en" ? `AI Coach · ${safetyInterception ? "Health safety alert" : forcedFinish ? "Limited-data fallback" : usedTools ? "Extra history read" : "Memory loaded"}` : `AI 教练 · ${safetyInterception ? "健康安全提醒" : forcedFinish ? "已降级生成" : usedTools ? "已补充读取历史" : "记忆已加载"}`) + telemetry);
   } catch (error) {
+    if (checkInSaved) loadWeeklyReview().catch(() => {});
     setStatus(language === "en" ? "AI service unavailable" : "AI 服务未连接", "error"); $("empty-plan").classList.add("hidden"); $("plan-content").classList.remove("hidden");
     const title = checkInSaved ? (language === "en" ? "Check-in saved, but AI guidance failed" : "打卡已保存，但 AI 建议生成失败") : (language === "en" ? "This check-in was not saved" : "这次没有保存");
     $("plan-content").innerHTML = `<div class="plan-intro"><strong>${escapeHtml(title)}</strong><br />${escapeHtml(error.message)}</div>`;
