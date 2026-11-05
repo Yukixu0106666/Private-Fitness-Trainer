@@ -4,21 +4,21 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>我的健身教练</title>
-    <link rel="stylesheet" href="styles.css?v=20261017-2" />
+    <meta name="theme-color" content="#f6f5f1" />
+    <link rel="stylesheet" href="styles.css?v=20261105-1" />
   </head>
   <body>
     <main class="app-shell">
       <header class="hero">
-        <div>
-          <p class="eyebrow">DAILY FITNESS AGENT</p>
-          <h1>我的健身教练</h1>
-          <p class="subtitle">记录今天，获得更适合明天的训练建议。</p>
+        <div class="brand">
+          <svg class="brand-mark" viewBox="0 0 32 36" fill="none" aria-hidden="true"><rect x="5" y="4" width="23" height="29" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M10 1v6M23 1v6M10 14h13M10 20h13M10 26h7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          <div><h1>我的健身教练</h1><p class="subtitle">身体状态、训练和饮食，记在这里。</p></div>
         </div>
-        <div><div id="connection-status" class="status-pill"><span></span> AI 教练 · 等待配置</div><button id="language-toggle" class="text-button" type="button">English</button><button id="logout-button" class="text-button hidden" type="button">退出登录</button></div>
+        <div class="hero-tools"><div id="connection-status" class="status-pill loading" role="status"><span></span> 正在连接…</div><div class="account-actions"><button id="language-toggle" class="text-button" type="button">English</button><button id="logout-button" class="text-button hidden" type="button">退出登录</button></div></div>
       </header>
 
       <section id="auth-card" class="card auth-card">
-        <div class="card-heading"><div><p class="section-kicker">YOUR ACCOUNT</p><h2 id="auth-title">登录</h2></div><span id="auth-user" class="muted"></span></div>
+        <div class="card-heading"><div><h2 id="auth-title">登录</h2><p class="auth-intro">登录后，继续记录你的日常。</p></div><span id="auth-user" class="muted"></span></div>
         <form id="auth-form">
           <label class="field"><span>邮箱</span><input id="auth-email" type="email" required autocomplete="email" /></label>
           <label class="field"><span>密码（至少 8 位）</span><input id="auth-password" type="password" required minlength="8" autocomplete="current-password" /></label>
@@ -32,27 +32,28 @@
         <div class="card form-card">
           <div class="card-heading">
             <div>
-              <p class="section-kicker">DAILY COACHING FLOW</p>
-              <h2>今天的教练</h2>
+              <h2>今天的记录</h2>
             </div>
-            <input id="log-date" class="date-input" type="date" required />
+            <input id="log-date" class="date-input" type="date" aria-label="记录日期" required />
           </div>
 
           <nav class="phase-tabs" aria-label="一天的三个阶段">
-            <button class="phase-tab" data-phase="morning" type="button"><span>早</span><strong>早上计划</strong><small>状态与今日安排</small></button>
-            <button class="phase-tab" data-phase="midday" type="button"><span>中</span><strong>训练完成</strong><small>运动与拉伸</small></button>
-            <button class="phase-tab" data-phase="evening" type="button"><span>晚</span><strong>晚上复盘</strong><small>饮食与排便</small></button>
+            <button class="phase-tab" data-phase="morning" type="button" aria-pressed="false"><strong>早上</strong><small>身体状态</small></button>
+            <button class="phase-tab" data-phase="midday" type="button" aria-pressed="false"><strong>训练后</strong><small>运动记录</small></button>
+            <button class="phase-tab" data-phase="evening" type="button" aria-pressed="false"><strong>晚上</strong><small>饮食与恢复</small></button>
           </nav>
 
           <form id="morning-form" class="phase-form">
-            <div class="phase-heading"><div><p class="section-kicker">MORNING CHECK-IN</p><h3>早上好，先看看今天的身体状态</h3></div><span id="morning-saved" class="saved-mark"></span></div>
+            <div class="phase-heading"><h3>今天身体怎么样？</h3><span id="morning-saved" class="saved-mark"></span></div>
+            <div class="metrics profile-metrics">
             <label class="field"><span>你的目标</span><select id="goal"><option value="fat-loss">减脂塑形</option><option value="muscle">增肌增力</option><option value="fitness">提升体能</option><option value="health">保持健康</option></select></label>
             <label class="field"><span>身高（cm）</span><input id="profile-height" type="number" min="100" max="250" step="1" placeholder="例如：168" required /></label>
+            </div>
             <details class="memory-settings">
-              <summary>长期记忆设置 <small>由你确认后保存</small></summary>
+              <summary>个人偏好 <small>器械、饮食与身体限制</small></summary>
               <label class="field"><span>可用器械 <em>可选</em></span><input id="profile-equipment" type="text" placeholder="例如：瑜伽垫、哑铃、弹力带" /></label>
               <label class="field"><span>饮食偏好或限制 <em>可选</em></span><input id="profile-diet" type="text" placeholder="例如：不吃牛肉、乳糖不耐" /></label>
-              <label class="field"><span>长期身体限制 <em>可选</em></span><input id="profile-constraints" type="text" placeholder="只填写希望教练长期记住的信息" /></label>
+              <label class="field"><span>需要注意的身体情况 <em>可选</em></span><input id="profile-constraints" type="text" placeholder="例如：旧伤、需要避开的动作" /></label>
             </details>
             <div class="metrics profile-metrics">
             <label class="field">
@@ -68,24 +69,24 @@
               <label class="field"><span>可运动时间</span><select id="available-time"><option value="20">20 分钟</option><option value="30">30 分钟</option><option value="45" selected>45 分钟</option><option value="60">60 分钟</option></select></label>
             </div>
             <label class="field"><span>身体不适或特别安排 <em>可选</em></span><input id="morning-notes" type="text" placeholder="例如：右膝不舒服，今天只能在家练" /></label>
-            <button id="morning-submit" class="primary-button" type="submit">生成今天的饮食与运动计划 <span>→</span></button>
+            <button id="morning-submit" class="primary-button" type="submit">保存，看看今天怎么练</button>
           </form>
 
           <form id="midday-form" class="phase-form hidden">
-            <div class="phase-heading"><div><p class="section-kicker">POST-WORKOUT</p><h3>练完了，记录实际完成情况</h3></div><span id="midday-saved" class="saved-mark"></span></div>
+            <div class="phase-heading"><h3>今天练了什么？</h3><span id="midday-saved" class="saved-mark"></span></div>
             <div class="field"><span class="field-label">做了哪些运动，各做了多少？</span><small class="workout-log-help">可以从早上的计划一键带入，再勾选和修改实际完成量。</small><div id="exercise-list" class="exercise-list"></div><button id="add-exercise" class="add-row-button" type="button">＋ 添加一项运动</button></div>
             <div class="metrics profile-metrics">
               <label class="field"><span>是否按早上建议完成</span><select id="plan-adherence"><option value="all">全部完成</option><option value="partial" selected>完成一部分</option><option value="different">做了其他运动</option><option value="none">今天没做</option></select></label>
               <label class="field"><span>实际强度</span><select id="workout-effort"><option value="2">2 · 很轻松</option><option value="3" selected>3 · 适中</option><option value="4">4 · 较累</option><option value="5">5 · 非常累</option></select></label>
             </div>
             <label class="field"><span>训练后感觉 <em>可选</em></span><input id="workout-notes" type="text" placeholder="例如：腿比较紧，左肩活动时不舒服" /></label>
-            <button id="midday-submit" class="primary-button" type="submit">生成训练后拉伸建议 <span>→</span></button>
+            <button id="midday-submit" class="primary-button" type="submit">保存，看看怎么拉伸</button>
           </form>
 
           <form id="evening-form" class="phase-form hidden">
-            <div class="phase-heading"><div><p class="section-kicker">EVENING REVIEW</p><h3>晚上好，完成今天的饮食与身体复盘</h3></div><span id="evening-saved" class="saved-mark"></span></div>
+            <div class="phase-heading"><h3>记下今天的饮食与感受</h3><span id="evening-saved" class="saved-mark"></span></div>
             <label class="field"><span>今天一整天吃了什么？</span><textarea id="food" rows="5" placeholder="按早餐、午餐、晚餐和加餐记录，尽量写上大致分量"></textarea></label>
-            <label class="field"><span>饮食照片 <em>可选，最多 4 张，每张 4 MB</em></span><input id="food-photos" type="file" accept="image/jpeg,image/png,image/webp" multiple /><div id="photo-preview" class="photo-preview"><div class="upload-hint">可上传餐食照片帮助 AI 判断搭配</div></div></label>
+            <label class="field"><span>饮食照片 <em>可选，最多 4 张，每张 4 MB</em></span><input id="food-photos" type="file" accept="image/jpeg,image/png,image/webp" multiple /><div id="photo-preview" class="photo-preview"><div class="upload-hint">也可以用照片补充饮食记录</div></div></label>
             <div class="wellness-heading"><span>一整天排便情况</span><small>帮助教练调整纤维和饮水</small></div>
             <div class="metrics">
               <label class="field"><span>次数</span><select id="bowel-frequency"><option value="0">没有</option><option value="1" selected>1 次</option><option value="2">2 次</option><option value="3">3 次或以上</option></select></label>
@@ -94,7 +95,7 @@
             </div>
             <small class="field-help">持续疼痛、出血或明显异常请咨询医生。</small>
             <label class="field"><span>今晚还有什么感受？ <em>可选</em></span><input id="evening-notes" type="text" placeholder="例如：晚饭后很撑、今天喝水比较少" /></label>
-            <button id="evening-submit" class="primary-button" type="submit">完成今日复盘 <span>→</span></button>
+            <button id="evening-submit" class="primary-button" type="submit">保存今天的记录</button>
             <p class="privacy-note">照片会发送到你配置的 AI 服务分析，请勿上传敏感或可识别他人的照片。</p>
           </form>
         </div>
@@ -102,15 +103,14 @@
         <aside class="card plan-card" aria-live="polite">
           <div class="card-heading">
             <div>
-              <p class="section-kicker">AI COACH RESPONSE</p>
-              <h2 id="plan-title">今日教练</h2>
+              <h2 id="plan-title">教练建议</h2>
+              <p class="plan-caption">结合你的记录，由 AI 生成</p>
             </div>
             <button id="clear-plan" class="text-button" type="button">清空</button>
           </div>
           <div id="empty-plan" class="empty-state">
-            <div class="coach-icon">✦</div>
-            <h3>从早上的状态开始</h3>
-            <p>我会陪你完成早上计划、训练后拉伸和晚上复盘，并在明早为今天评分。</p>
+            <h3>先记下今天的状态</h3>
+            <p>保存记录后，在这里查看训练、饮食或拉伸建议。已有的建议可以切换日期查看。</p>
           </div>
           <div id="plan-content" class="plan-content hidden"></div>
           <div id="plan-provenance" class="plan-provenance hidden"></div>
@@ -120,8 +120,7 @@
       <section class="card progress-card hidden" id="progress-content">
         <div class="card-heading progress-heading">
           <div>
-            <p class="section-kicker">YOUR PROGRESS</p>
-            <h2>进度趋势</h2>
+            <h2>最近的变化</h2>
           </div>
           <div class="range-toggle" role="group" aria-label="进度统计范围">
             <button type="button" data-days="7">7 天</button>
@@ -149,7 +148,7 @@
         </div>
         <section class="weekly-review" aria-labelledby="weekly-review-title">
           <div class="weekly-heading">
-            <div><span class="section-kicker">WEEKLY REVIEW</span><h3 id="weekly-review-title">每周复盘与下周调整</h3><small id="weekly-period"></small></div>
+            <div><h3 id="weekly-review-title">这一周</h3><small id="weekly-period"></small></div>
             <div class="week-toggle" role="group" aria-label="周报时间范围"><button type="button" data-week-offset="-1">上一周</button><button class="active" type="button" data-week-offset="0">本周</button></div>
           </div>
           <div id="weekly-loading" class="weekly-empty">正在整理本周记录…</div>
@@ -164,7 +163,6 @@
       <section class="card history-card hidden" id="history-content">
         <div class="card-heading">
           <div>
-            <p class="section-kicker">YOUR JOURNEY</p>
             <h2>最近记录</h2>
           </div>
           <span id="record-count" class="record-count">0 条记录</span>
@@ -174,14 +172,14 @@
         </div>
         <details class="data-controls">
           <summary>数据与账号管理</summary>
-          <p class="muted">你可以导出所有打卡、长期画像和 AI 建议。</p>
+          <p class="muted">导出你的打卡、个人设置和教练建议。</p>
           <div class="data-actions">
             <button id="export-data" class="secondary-button" type="button">导出个人数据</button>
-            <button id="clear-profile" class="secondary-button danger-text" type="button">清空长期记忆</button>
+            <button id="clear-profile" class="secondary-button danger-text" type="button">清空个人偏好</button>
           </div>
           <div class="delete-account-box">
             <strong>永久删除账号</strong>
-            <p class="muted">这会删除所有打卡、AI 建议、请求追踪和向量记忆，且无法恢复。</p>
+            <p class="muted">这会永久删除所有记录、个人设置和教练建议，且无法恢复。</p>
             <label class="field"><span>输入密码确认</span><input id="delete-account-password" type="password" autocomplete="current-password" /></label>
             <button id="delete-account" class="danger-button" type="button">永久删除账号</button>
           </div>
@@ -191,6 +189,6 @@
 
       <footer id="app-footer" class="hidden">健康建议不能替代医生或持证教练的诊断。出现疼痛、胸闷、眩晕等症状时请停止训练并寻求专业帮助。</footer>
     </main>
-    <script src="app.js?v=20261017-2"></script>
+    <script src="app.js?v=20261105-1"></script>
   </body>
 </html>

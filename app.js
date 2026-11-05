@@ -32,7 +32,7 @@ const enText = {
   "是否按早上建议完成": "Followed the morning plan?", "全部完成": "Completed all", "完成一部分": "Completed part", "做了其他运动": "Did a different workout",
   "今天没做": "No workout today", "实际强度": "Perceived effort", "训练后感觉": "How did you feel afterward?", "生成训练后拉伸建议": "Create post-workout stretches",
   "晚上好，完成今天的饮食与身体复盘": "Good evening — finish today's food and body review", "今天一整天吃了什么？": "What did you eat today?",
-  "饮食照片": "Food photos", "可上传餐食照片帮助 AI 判断搭配": "Upload meal photos to help AI review food balance", "一整天排便情况": "Bowel movements today",
+  "饮食照片": "Food photos", "也可以用照片补充饮食记录": "You can also add photos of your meals", "一整天排便情况": "Bowel movements today",
   "帮助教练调整纤维和饮水": "Helps adjust fiber and hydration", "次数": "Count", "没有": "None", "1 次": "Once", "2 次": "Twice", "3 次或以上": "3 or more",
   "状态": "Consistency", "正常": "Normal", "偏硬/干结": "Hard / dry", "偏稀": "Loose", "水样": "Watery", "不确定": "Not sure", "感受": "Symptoms",
   "无明显不适": "No discomfort", "需要用力": "Straining", "没排干净": "Incomplete", "伴随腹胀": "Bloating", "疼痛/出血": "Pain / bleeding",
@@ -43,16 +43,33 @@ const enText = {
   "健康建议不能替代医生或持证教练的诊断。出现疼痛、胸闷、眩晕等症状时请停止训练并寻求专业帮助。": "Health guidance does not replace a doctor or certified trainer. Stop and seek help for pain, chest tightness, or dizziness.",
   "很好": "Very good", "不错": "Good", "一般": "Average", "较低": "Low", "很差": "Very low", "几乎没有": "Almost none", "轻微": "Slight", "中等": "Moderate", "明显": "Noticeable", "很严重": "Severe",
   "很轻松": "Very easy", "适中": "Moderate", "较累": "Hard", "非常累": "Very hard", "分钟": "min", "个": "reps", "已保存": "Saved",
-  "长期记忆设置": "Long-term memory", "由你确认后保存": "saved only after your confirmation", "可用器械": "Available equipment", "饮食偏好或限制": "Dietary preferences or restrictions", "长期身体限制": "Long-term physical constraints", "只填写希望教练长期记住的信息": "Only enter information you want the coach to remember",
-  "数据与账号管理": "Data and account management", "你可以导出所有打卡、长期画像和 AI 建议。": "Export all check-ins, your long-term profile, and AI guidance.",
-  "导出个人数据": "Export personal data", "清空长期记忆": "Clear long-term memory", "永久删除账号": "Permanently delete account",
-  "这会删除所有打卡、AI 建议、请求追踪和向量记忆，且无法恢复。": "This deletes every check-in, AI response, request trace, and vector memory and cannot be undone.",
+  "个人偏好": "Preferences", "器械、饮食与身体限制": "Equipment, food, and physical needs", "可用器械": "Available equipment", "饮食偏好或限制": "Dietary preferences or restrictions", "需要注意的身体情况": "Physical needs to keep in mind", "例如：旧伤、需要避开的动作": "e.g. past injuries or movements to avoid",
+  "数据与账号管理": "Data and account management", "导出你的打卡、个人设置和教练建议。": "Export your entries, preferences, and coaching notes.",
+  "导出个人数据": "Export personal data", "清空个人偏好": "Clear preferences", "永久删除账号": "Permanently delete account",
+  "这会永久删除所有记录、个人设置和教练建议，且无法恢复。": "This permanently deletes all entries, preferences, and coaching notes. It cannot be undone.",
   "输入密码确认": "Enter your password to confirm", "可以从早上的计划一键带入，再勾选和修改实际完成量。": "Import the morning plan, then check off and adjust what you completed.",
   "进度趋势": "Progress trends", "体重趋势": "Weight trend", "圆点为记录值，线条为移动平均": "Dots are entries; the line is a moving average",
   "恢复状态": "Recovery", "睡眠与精力变化": "Sleep and energy trends", "完成打卡后，这里会显示你的趋势": "Your trends will appear after you check in",
   "连续记录几天，就能看见体重、恢复和训练变化。": "Log a few days to see changes in weight, recovery, and training.",
   "每周复盘与下周调整": "Weekly review and next-week adjustments", "上一周": "Prior week", "本周": "This week",
-  "正在整理本周记录…": "Preparing weekly review…", "训练分布": "Exercise distribution", "本周收获": "This week's win", "下周调整": "Next-week adjustments"
+  "正在整理本周记录…": "Loading this week's records…", "训练分布": "Exercise distribution", "本周收获": "This week's win", "下周调整": "Next-week adjustments",
+  "身体状态、训练和饮食，记在这里。": "A place for your training, meals, and daily notes.",
+  "登录后，继续记录你的日常。": "Log in to pick up where you left off.",
+  "正在连接…": "Connecting…", "记录服务已连接": "Connected", "今天的记录": "Daily log",
+  "早上": "Morning", "训练后": "After training", "晚上": "Evening",
+  "身体状态": "How you feel", "运动记录": "Workout log", "饮食与恢复": "Food & recovery",
+  "今天身体怎么样？": "How are you feeling today?", "今天练了什么？": "What did you train today?",
+  "记下今天的饮食与感受": "Today's food and how you feel",
+  "保存，看看今天怎么练": "Save and plan today's training", "保存，看看怎么拉伸": "Save and get stretches",
+  "保存今天的记录": "Save today's notes", "教练建议": "Coach's notes", "结合你的记录，由 AI 生成": "AI guidance based on your records",
+  "先记下今天的状态": "Start with how you're feeling",
+  "保存记录后，在这里查看训练、饮食或拉伸建议。已有的建议可以切换日期查看。": "Save an entry to see your training, meal, or stretching guidance here. Choose a date to revisit past notes.",
+  "最近的变化": "Recent changes", "这一周": "This week",
+  "今日计划": "Today's plan", "拉伸建议": "Stretches", "今日复盘": "Today's review",
+  "昨天表现": "Yesterday", "今天的运动": "Today's training", "今天怎么吃": "Meals",
+  "早餐": "Breakfast", "午餐": "Lunch", "晚餐": "Dinner", "恢复提醒": "Recovery notes",
+  "现在这样拉伸": "Your stretches", "安全提醒": "Keep in mind", "今日训练": "Today's training",
+  "今天做得好的地方": "What went well", "明早评分会关注": "For tomorrow's review", "今晚提醒": "For tonight"
 };
 const originalText = new WeakMap();
 const originalPlaceholder = new WeakMap();
@@ -75,7 +92,7 @@ function applyLanguage() {
     element.placeholder = language === "en" ? ({
       "例如：168": "e.g. 168", "例如：55.05": "e.g. 55.05", "运动名称，如快走": "Exercise, e.g. brisk walking", "例如：右膝不舒服，今天只能在家练": "e.g. My right knee hurts; I can only train at home",
       "例如：腿比较紧，左肩活动时不舒服": "e.g. Tight legs and left shoulder discomfort", "按早餐、午餐、晚餐和加餐记录，尽量写上大致分量": "List breakfast, lunch, dinner, snacks, and approximate portions",
-      "例如：晚饭后很撑、今天喝水比较少": "e.g. Felt too full after dinner and drank little water", "例如：瑜伽垫、哑铃、弹力带": "e.g. yoga mat, dumbbells, resistance bands", "例如：不吃牛肉、乳糖不耐": "e.g. no beef, lactose intolerant", "只填写希望教练长期记住的信息": "Only enter information you want the coach to remember"
+      "例如：晚饭后很撑、今天喝水比较少": "e.g. Felt too full after dinner and drank little water", "例如：瑜伽垫、哑铃、弹力带": "e.g. yoga mat, dumbbells, resistance bands", "例如：不吃牛肉、乳糖不耐": "e.g. no beef, lactose intolerant", "例如：旧伤、需要避开的动作": "e.g. past injuries or movements to avoid"
     }[original] || original) : original;
   });
   $("language-toggle").textContent = language === "en" ? "中文" : "English";
@@ -284,13 +301,13 @@ $("export-data").addEventListener("click", async () => {
 });
 
 $("clear-profile").addEventListener("click", async () => {
-  const confirmed = window.confirm(language === "en" ? "Clear your confirmed long-term profile? Daily records will be kept." : "确定清空已确认的长期记忆吗？每日打卡会保留。");
+  const confirmed = window.confirm(language === "en" ? "Clear your saved preferences? Daily records will be kept." : "确定清空个人偏好吗？每日打卡会保留。");
   if (!confirmed) return;
   try {
     const result = await authRequest("/api/profile/clear", {});
     profile = result.profile?.confirmed || {};
     populateForms();
-    setDataActionStatus(language === "en" ? "Long-term memory cleared." : "长期记忆已清空。");
+    setDataActionStatus(language === "en" ? "Preferences cleared." : "个人偏好已清空。");
   } catch (error) { setDataActionStatus(error.message, true); }
 });
 
@@ -315,7 +332,11 @@ $("delete-account").addEventListener("click", async () => {
 
 function switchPhase(phase, showSavedResponse = true) {
   activePhase = phase;
-  document.querySelectorAll(".phase-tab").forEach((tab) => tab.classList.toggle("active", tab.dataset.phase === phase));
+  document.querySelectorAll(".phase-tab").forEach((tab) => {
+    const selected = tab.dataset.phase === phase;
+    tab.classList.toggle("active", selected);
+    tab.setAttribute("aria-pressed", String(selected));
+  });
   ["morning", "midday", "evening"].forEach((name) => $(`${name}-form`).classList.toggle("hidden", name !== phase));
   if (showSavedResponse) renderSavedResponse();
 }
@@ -342,7 +363,7 @@ function renderPhotoPreviews(message = "") {
   if (message || !photos.length) {
     const hint = document.createElement("div");
     hint.className = "upload-hint";
-    hint.textContent = message || tr("可上传餐食照片帮助 AI 判断搭配");
+    hint.textContent = message || tr("也可以用照片补充饮食记录");
     preview.appendChild(hint);
     return;
   }
@@ -457,21 +478,21 @@ function renderProvenance(provenance) {
     return;
   }
   const sourceLabels = provenance.sources.map((source) => {
-    if (source.type === "confirmed_profile") return language === "en" ? "confirmed profile" : "已确认画像";
+    if (source.type === "confirmed_profile") return language === "en" ? "your preferences" : "个人偏好";
     if (source.type === "daily_record") return `${language === "en" ? "record" : "记录"} ${source.date}`;
-    if (source.type === "coach_output") return `${language === "en" ? "prior AI plan" : "既有 AI 计划"} ${source.date}`;
-    if (source.type === "server_derived_stats") return `${language === "en" ? "server-calculated trend" : "服务端计算趋势"} ${source.period?.from || ""}–${source.period?.to || ""}`;
+    if (source.type === "coach_output") return `${language === "en" ? "earlier guidance" : "之前的建议"} ${source.date}`;
+    if (source.type === "server_derived_stats") return `${language === "en" ? "recent trends" : "近期变化"} ${source.period?.from || ""}–${source.period?.to || ""}`;
     if (source.type === "server_derived_exercise_progress") return language === "en" ? "exercise progression history" : "动作渐进历史";
     if (source.type === "server_derived_weekly_review") return language === "en" ? "weekly review" : "每周复盘";
     if (source.type === "tool_daily_record") return `${language === "en" ? "extra record" : "补充记录"} ${source.date}`;
     if (source.type === "tool_recent_records") return language === "en" ? "extra recent records" : "补充近期记录";
     if (source.type === "tool_derived_weight_trend") return language === "en" ? "extra weight trend" : "补充体重趋势";
-    if (source.type === "hybrid_pgvector_reranked") return language === "en" ? "reranked semantic history" : "向量召回与重排历史";
-    return source.type;
+    if (source.type === "hybrid_pgvector_reranked") return language === "en" ? "related past entries" : "相关历史记录";
+    return language === "en" ? "other records" : "其他记录";
   });
   const missing = Array.isArray(provenance.missingData) && provenance.missingData.length
     ? ` · ${language === "en" ? "Missing" : "缺少"}: ${provenance.missingData.map(escapeHtml).join(", ")}` : "";
-  element.innerHTML = `<strong>${language === "en" ? "Evidence" : "依据来源"}</strong>: ${sourceLabels.map(escapeHtml).join(" · ") || (language === "en" ? "current input only" : "仅本次输入")}${missing}`;
+  element.innerHTML = `<strong>${language === "en" ? "Based on" : "参考记录"}</strong>: ${sourceLabels.map(escapeHtml).join(" · ") || (language === "en" ? "this entry only" : "本次记录")}${missing}`;
   element.classList.remove("hidden");
 }
 
@@ -751,7 +772,7 @@ function renderWeeklyReview() {
   const { period, metrics, comparison, nextWeek } = weeklyReview;
   $("weekly-loading").classList.add("hidden");
   $("weekly-body").classList.remove("hidden");
-  $("weekly-review-title").textContent = language === "en" ? "Weekly review and next-week adjustments" : "每周复盘与下周调整";
+  $("weekly-review-title").textContent = language === "en" ? (weeklyOffset ? "Last week" : "This week") : (weeklyOffset ? "上一周" : "这一周");
   $("weekly-period").textContent = `${period.start} — ${period.end}${weeklyOffset === 0 ? (language === "en" ? " · week to date" : " · 截至今天") : ""}`;
   const completion = metrics.planCompletionRate === null ? "—" : `${Math.round(metrics.planCompletionRate * 100)}%`;
   $("weekly-metrics").innerHTML = [
@@ -874,25 +895,26 @@ async function runPhase({ phase, button, checkIn, images = [] }) {
   if (phase === "midday") { Object.assign(record, { midday: factualCheckIn }); delete record.stretch; }
   if (phase === "evening") { Object.assign(record, { evening: factualCheckIn }); delete record.eveningReview; }
   let checkInSaved = false;
-  button.disabled = true; button.textContent = language === "en" ? "AI coach is analyzing…" : "AI 教练正在分析…"; setStatus(language === "en" ? "Saving check-in…" : "正在保存打卡…", "loading");
+  button.disabled = true; button.textContent = language === "en" ? "Preparing your guidance…" : "正在整理建议…"; setStatus(language === "en" ? "Saving…" : "正在保存…", "loading");
   try {
     await saveRecord(record);
     checkInSaved = true;
     delete record._profile;
     delete record._invalidatePhase;
-    setStatus(language === "en" ? "Check-in saved · AI analyzing…" : "打卡已保存 · AI 分析中…", "loading");
+    setStatus(language === "en" ? "Saved · Preparing guidance…" : "已保存 · 正在整理建议…", "loading");
     const result = await requestCoach({ phase, ...factualCheckIn }, images);
     const response = result.plan;
     if (phase === "morning") Object.assign(record, { plan: response });
     if (phase === "midday") Object.assign(record, { stretch: response });
     if (phase === "evening") Object.assign(record, { eveningReview: response });
     await loadRecords();
-    const usedTools = Array.isArray(result.toolsUsed) && result.toolsUsed.length;
     const forcedFinish = result.agent?.forcedFinish;
     const safetyInterception = result.agent?.safetyInterception;
-    const observed = result.observability;
-    const telemetry = observed ? ` · ${(Number(observed.durationMs) / 1000).toFixed(1)}s${observed.estimatedCostUsd === null ? "" : ` · $${Number(observed.estimatedCostUsd).toFixed(4)}`}` : "";
-    renderCoachResponse(response, phase); renderProvenance(result.provenance); setStatus((language === "en" ? `AI Coach · ${safetyInterception ? "Health safety alert" : forcedFinish ? "Limited-data fallback" : usedTools ? "Extra history read" : "Memory loaded"}` : `AI 教练 · ${safetyInterception ? "健康安全提醒" : forcedFinish ? "已降级生成" : usedTools ? "已补充读取历史" : "记忆已加载"}`) + telemetry);
+    renderCoachResponse(response, phase);
+    renderProvenance(result.provenance);
+    setStatus(language === "en"
+      ? (safetyInterception ? "Please check the health alert" : forcedFinish ? "Guidance ready · Some information missing" : "Guidance ready")
+      : (safetyInterception ? "请先查看健康提醒" : forcedFinish ? "建议已更新 · 部分信息不足" : "建议已更新"));
   } catch (error) {
     if (checkInSaved) loadWeeklyReview().catch(() => {});
     setStatus(language === "en" ? "AI service unavailable" : "AI 服务未连接", "error"); $("empty-plan").classList.add("hidden"); $("plan-content").classList.remove("hidden");
@@ -939,6 +961,10 @@ $("clear-plan").addEventListener("click", showEmptyCoach);
 switchPhase(activePhase, false);
 applyLanguage();
 
-fetch("/api/me", { credentials: "same-origin" }).then((response) => response.json()).then(async ({ user }) => {
+fetch("/api/me", { credentials: "same-origin" }).then((response) => {
+  if (!response.ok) throw new Error("Record service unavailable");
+  return response.json();
+}).then(async ({ user }) => {
+  setStatus(tr("记录服务已连接"));
   if (user) { showApp(user); await loadRecords(); }
 }).catch(() => setStatus("记录服务未连接", "error"));
