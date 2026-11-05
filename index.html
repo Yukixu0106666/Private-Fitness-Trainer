@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>我的健身教练</title>
     <meta name="theme-color" content="#f6f5f1" />
-    <link rel="stylesheet" href="styles.css?v=20261105-4" />
+    <link rel="stylesheet" href="styles.css?v=20261105-5" />
   </head>
   <body>
     <main class="app-shell">
@@ -90,6 +90,20 @@
               <label class="field-label" for="food-photos">饮食照片 <em>可选，最多 4 张，每张 4 MB</em></label>
               <div class="upload-control"><input id="food-photos" class="visually-hidden" type="file" accept="image/jpeg,image/png,image/webp" aria-label="选择饮食照片" multiple /><button id="choose-food-photos" class="upload-button" type="button">选择照片</button><span id="food-photo-name" class="upload-name" aria-live="polite">未选择照片</span></div>
               <div id="photo-preview" class="photo-preview"><div class="upload-hint">也可以用照片补充饮食记录</div></div>
+              <div class="food-analysis-toolbar"><button id="analyze-food-photos" class="secondary-button" type="button" disabled>分析照片</button><span id="food-analysis-status" class="food-analysis-status">选择照片后可以估算营养</span></div>
+              <section id="food-analysis-panel" class="food-analysis-panel hidden" aria-labelledby="food-analysis-title">
+                <div class="food-analysis-heading"><div><h4 id="food-analysis-title">照片营养估算</h4><p>这是区间估算，请检查食物和分量后再确认。</p></div><span id="food-analysis-confidence" class="confidence-badge"></span></div>
+                <div id="food-analysis-items" class="food-analysis-items"></div>
+                <button id="add-food-analysis-item" class="add-row-button" type="button">＋ 添加食物</button>
+                <div class="nutrition-totals" aria-label="营养估算合计">
+                  <div><span>热量区间</span><strong id="food-total-calories">—</strong></div>
+                  <div><span>蛋白质</span><strong id="food-total-protein">—</strong></div>
+                  <div><span>碳水</span><strong id="food-total-carbs">—</strong></div>
+                  <div><span>脂肪</span><strong id="food-total-fat">—</strong></div>
+                </div>
+                <div id="food-analysis-assumptions" class="food-analysis-assumptions"></div>
+                <button id="confirm-food-analysis" class="confirm-analysis-button" type="button">确认这份估算</button>
+              </section>
             </div>
             <div class="wellness-heading"><span>一整天排便情况</span><small>帮助教练调整纤维和饮水</small></div>
             <div class="metrics">
@@ -100,7 +114,7 @@
             <small class="field-help">持续疼痛、出血或明显异常请咨询医生。</small>
             <label class="field"><span>今晚还有什么感受？ <em>可选</em></span><input id="evening-notes" type="text" placeholder="例如：晚饭后很撑、今天喝水比较少" /></label>
             <button id="evening-submit" class="primary-button" type="submit">保存今天的记录</button>
-            <p class="privacy-note">照片会发送到你配置的 AI 服务分析，请勿上传敏感或可识别他人的照片。</p>
+            <p class="privacy-note">照片只用于本次分析，不会保存到数据库。请勿上传敏感或可识别他人的照片。</p>
           </form>
         </div>
 
@@ -193,6 +207,6 @@
 
       <footer id="app-footer" class="hidden">健康建议不能替代医生或持证教练的诊断。出现疼痛、胸闷、眩晕等症状时请停止训练并寻求专业帮助。</footer>
     </main>
-    <script src="app.js?v=20261105-4"></script>
+    <script src="app.js?v=20261105-5"></script>
   </body>
 </html>

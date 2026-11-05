@@ -116,6 +116,31 @@ class ModelRequestTests(unittest.TestCase):
         self.assertNotIn("tools", body)
         self.assertEqual(body["response_format"], {"type": "json_object"})
 
+    def test_food_photo_analysis_uses_images_and_returns_server_totals(self):
+        model_output = {
+            "items": [{
+                "name": "Chicken rice", "portion": "1 bowl",
+                "caloriesMin": 520, "caloriesMax": 680,
+                "proteinGrams": 35, "carbsGrams": 72, "fatGrams": 16,
+                "confidence": "medium",
+            }],
+            "overallConfidence": "medium",
+            "assumptions": ["Oil amount is not visible"],
+        }
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key", "OPENAI_MODEL": "vision-model"}), \
+                patch.object(server, "request_model", return_value={"content": json.dumps(model_output)}) as request:
+            analysis, model = server.analyze_food_images({
+                "language": "en", "foodText": "Lunch",
+                "images": ["data:image/jpeg;base64,AA=="],
+            })
+
+        self.assertEqual(model, "vision-model")
+        self.assertEqual(analysis["totals"]["caloriesMin"], 520)
+        self.assertFalse(analysis["confirmed"])
+        image_content = request.call_args.args[3][1]["content"][-1]
+        self.assertEqual(image_content["type"], "image_url")
+        self.assertEqual(image_content["image_url"]["detail"], "high")
+
 
 class RecordPersistenceTests(unittest.TestCase):
     def create_user(self):
@@ -189,6 +214,39 @@ class RecordPersistenceTests(unittest.TestCase):
                 self.assertIn("server_derived_stats", {source["type"] for source in provenance["sources"]})
                 self.assertIn("server_derived_exercise_progress", {source["type"] for source in provenance["sources"]})
                 self.assertIn("server_derived_weekly_review", {source["type"] for source in provenance["sources"]})
+
+    def test_confirmed_food_analysis_is_saved_without_raw_photos_and_retrieved_next_day(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(server, "DB_PATH", os.path.join(directory, "fitness.db")):
+                server.init_db()
+                user_id = self.create_user()
+                server.save_record(user_id, {
+                    "date": "2026-09-21", "goal": "health", "height": 168,
+                    "evening": {"food": "Chicken rice", "foodAnalysis": {
+                        "confirmed": True,
+                        "rawImage": "data:image/jpeg;base64,DO-NOT-SAVE",
+                        "items": [{
+                            "name": "Chicken rice", "portion": "1 bowl",
+                            "caloriesMin": 520, "caloriesMax": 680,
+                            "proteinGrams": 35, "carbsGrams": 72, "fatGrams": 16,
+                            "confidence": "medium",
+                        }],
+                        "overallConfidence": "medium",
+                        "assumptions": ["Oil amount is uncertain"],
+                    }},
+                })
+                server.save_record(user_id, {
+                    "date": "2026-09-22", "goal": "health", "height": 168,
+                    "morning": {"sleep": 7, "energy": 4},
+                })
+
+                stored = server.fact_records(user_id)[1]["evening"]["foodAnalysis"]
+                self.assertTrue(stored["confirmed"])
+                self.assertEqual(stored["totals"]["caloriesMax"], 680)
+                self.assertNotIn("rawImage", stored)
+                self.assertNotIn("data:image", json.dumps(server.fact_records(user_id)))
+                memory, _ = server.build_memory_context(user_id, {"phase": "morning", "date": "2026-09-22"})
+                self.assertEqual(memory["previousDay"]["evening"]["foodAnalysis"]["totals"]["proteinGrams"], 35)
 
     def test_resubmitting_one_phase_invalidates_only_that_ai_output(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -352,6 +410,24 @@ class FactValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "格式"):
             server.validate_images(["data:image/svg+xml;base64,AA=="])
 
+    def test_food_analysis_requires_confirmation_and_a_real_calorie_range(self):
+        analysis = {
+            "confirmed": False,
+            "items": [{
+                "name": "Rice", "portion": "1 bowl",
+                "caloriesMin": 200, "caloriesMax": 300,
+                "proteinGrams": 4, "carbsGrams": 60, "fatGrams": 1,
+                "confidence": "high",
+            }],
+            "overallConfidence": "high", "assumptions": [],
+        }
+        with self.assertRaisesRegex(ValueError, "确认"):
+            server.validate_record_input({"date": "2026-09-22", "evening": {"foodAnalysis": analysis}})
+        analysis["confirmed"] = True
+        analysis["items"][0]["caloriesMax"] = 200
+        with self.assertRaisesRegex(ValueError, "区间"):
+            server.validate_record_input({"date": "2026-09-22", "evening": {"foodAnalysis": analysis}})
+
     def test_rate_limit_returns_retry_after(self):
         key = ("test", time.time_ns())
         self.assertEqual(server.rate_limit(key, 2, 60, clock=100), (True, 0))
@@ -497,6 +573,43 @@ class HealthSafetyHttpTests(unittest.TestCase):
             self.assertEqual(result["plan"]["safetyAlert"]["level"], "emergency")
             outputs = server.coach_outputs(user_id, "2026-09-22")
             self.assertEqual(outputs[0]["model"], "deterministic-safety-gate")
+
+
+class FoodAnalysisHttpTests(unittest.TestCase):
+    def test_photo_analysis_endpoint_returns_preview_without_writing_a_record(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(server, "DB_PATH", os.path.join(directory, "fitness.db")):
+            server.init_db()
+            with server.db() as (connection, placeholder):
+                cursor = server.query(
+                    connection,
+                    f"INSERT INTO users (email,password_hash,created_at) VALUES ({placeholder},{placeholder},{placeholder})",
+                    ("food@example.com", "hash", "now"),
+                )
+                user_id = cursor.lastrowid
+            body = json.dumps({
+                "language": "en",
+                "images": ["data:image/jpeg;base64,AA=="],
+            }).encode()
+            handler = object.__new__(server.Handler)
+            handler.path = "/api/food-analysis"
+            handler.headers = {"Content-Type": "application/json", "Content-Length": str(len(body))}
+            handler.rfile = io.BytesIO(body)
+            captured = {}
+            preview = {"items": [{"name": "Rice"}], "confirmed": False}
+
+            def capture(status, payload, **_kwargs):
+                captured.update({"status": status, "payload": payload})
+
+            with patch.object(handler, "current_user", return_value={"id": user_id}), \
+                    patch.object(handler, "send_json", side_effect=capture), \
+                    patch.object(server, "rate_limit", return_value=(True, 0)), \
+                    patch.object(server, "analyze_food_images", return_value=(preview, "vision-model")):
+                handler.do_POST()
+
+            self.assertEqual(captured["status"], 200)
+            self.assertEqual(captured["payload"]["analysis"], preview)
+            self.assertEqual(server.fact_records(user_id), [])
 
 
 class DataControlTests(unittest.TestCase):

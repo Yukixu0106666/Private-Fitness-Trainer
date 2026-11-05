@@ -19,7 +19,7 @@ from urllib.parse import parse_qs, urlparse
 from urllib.request import Request, urlopen
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
-MAX_BODY = 18 * 1024 * 1024
+MAX_BODY = 28 * 1024 * 1024
 DB_PATH = os.path.join(ROOT, "fitness.db")
 SESSION_DAYS = 30
 MAX_AGENT_STEPS = 4
@@ -32,6 +32,7 @@ LOGIN_RATE_WINDOW = 15 * 60
 COACH_RATE_LIMIT = 20
 COACH_RATE_WINDOW = 60 * 60
 TEXT_LIMIT = 2000
+FOOD_ANALYSIS_MAX_ITEMS = 12
 _rate_events = {}
 _rate_lock = threading.Lock()
 
@@ -160,6 +161,9 @@ def validate_record_input(record):
                 raise ValueError(f"第 {index + 1} 项训练计划索引无效")
         if "completed" in exercise and not isinstance(exercise.get("completed"), bool):
             raise ValueError(f"第 {index + 1} 项训练完成状态无效")
+    evening = record.get("evening") if isinstance(record.get("evening"), dict) else {}
+    if evening.get("foodAnalysis") is not None:
+        evening["foodAnalysis"] = normalize_food_analysis(evening["foodAnalysis"], require_confirmed=True)
 
 
 def validate_images(images):
@@ -172,6 +176,80 @@ def validate_images(images):
             raise ValueError("餐食照片格式仅支持 JPEG、PNG 或 WebP")
         if len(image) > 6 * 1024 * 1024:
             raise ValueError("单张餐食照片过大")
+
+
+def _food_number(value, name, minimum=0, maximum=5000):
+    if isinstance(value, bool):
+        raise ValueError(f"{name}必须是数字")
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"{name}必须是数字") from error
+    if not math.isfinite(number) or not minimum <= number <= maximum:
+        raise ValueError(f"{name}必须位于 {minimum}-{maximum} 之间")
+    return round(number, 1)
+
+
+def normalize_food_analysis(value, require_confirmed=False):
+    if not isinstance(value, dict):
+        raise ValueError("照片营养分析格式无效")
+    if require_confirmed and value.get("confirmed") is not True:
+        raise ValueError("请先确认照片营养分析")
+    items = value.get("items")
+    if not isinstance(items, list) or not 1 <= len(items) <= FOOD_ANALYSIS_MAX_ITEMS:
+        raise ValueError(f"照片营养分析需包含 1-{FOOD_ANALYSIS_MAX_ITEMS} 项食物")
+    normalized_items = []
+    for index, item in enumerate(items):
+        if not isinstance(item, dict):
+            raise ValueError(f"第 {index + 1} 项食物格式无效")
+        name = str(item.get("name", "")).strip()
+        portion = str(item.get("portion", "")).strip()
+        if not name or len(name) > 100:
+            raise ValueError(f"第 {index + 1} 项食物名称无效")
+        if not portion or len(portion) > 160:
+            raise ValueError(f"第 {index + 1} 项食物分量无效")
+        calories_min = _food_number(item.get("caloriesMin"), f"第 {index + 1} 项最低热量")
+        calories_max = _food_number(item.get("caloriesMax"), f"第 {index + 1} 项最高热量")
+        if calories_max <= calories_min:
+            raise ValueError(f"第 {index + 1} 项热量必须填写由低到高的区间")
+        confidence = str(item.get("confidence", "")).lower()
+        if confidence not in ("low", "medium", "high"):
+            raise ValueError(f"第 {index + 1} 项可信度无效")
+        normalized_items.append({
+            "name": name,
+            "portion": portion,
+            "caloriesMin": calories_min,
+            "caloriesMax": calories_max,
+            "proteinGrams": _food_number(item.get("proteinGrams"), f"第 {index + 1} 项蛋白质", maximum=500),
+            "carbsGrams": _food_number(item.get("carbsGrams"), f"第 {index + 1} 项碳水", maximum=1000),
+            "fatGrams": _food_number(item.get("fatGrams"), f"第 {index + 1} 项脂肪", maximum=500),
+            "confidence": confidence,
+        })
+    assumptions = value.get("assumptions") or []
+    if not isinstance(assumptions, list) or len(assumptions) > 8:
+        raise ValueError("照片营养分析假设过多")
+    assumptions = [str(item).strip()[:300] for item in assumptions if str(item).strip()]
+    overall_confidence = str(value.get("overallConfidence", "medium")).lower()
+    if overall_confidence not in ("low", "medium", "high"):
+        raise ValueError("照片营养分析整体可信度无效")
+    totals = {
+        "caloriesMin": round(sum(item["caloriesMin"] for item in normalized_items), 1),
+        "caloriesMax": round(sum(item["caloriesMax"] for item in normalized_items), 1),
+        "proteinGrams": round(sum(item["proteinGrams"] for item in normalized_items), 1),
+        "carbsGrams": round(sum(item["carbsGrams"] for item in normalized_items), 1),
+        "fatGrams": round(sum(item["fatGrams"] for item in normalized_items), 1),
+    }
+    normalized = {
+        "source": "photo_estimate",
+        "items": normalized_items,
+        "totals": totals,
+        "overallConfidence": overall_confidence,
+        "assumptions": assumptions,
+        "confirmed": bool(require_confirmed),
+    }
+    if require_confirmed:
+        normalized["confirmedAt"] = now().isoformat()
+    return normalized
 
 
 def _text_values(value):
@@ -1727,14 +1805,53 @@ def parse_model_content(message):
     return json.loads(message["content"])
 
 
-def call_model(payload, user_id, trace=None):
+def model_configuration():
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         raise RuntimeError("服务端未配置 OPENAI_API_KEY")
     base_url = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
     model = os.environ.get("OPENAI_MODEL", "qwen/qwen3.8-27b")
     if api_key.startswith("gsk_") and base_url == "https://api.openai.com/v1":
-        base_url, model = "https://api.groq.com/openai/v1", model
+        base_url = "https://api.groq.com/openai/v1"
+    return base_url, api_key, model
+
+
+def food_analysis_prompt(body):
+    images = body.get("images") or []
+    food_text = str(body.get("foodText", "")).strip()[:600]
+    language = "English" if body.get("language") == "en" else "Chinese"
+    schema = {
+        "items": [{
+            "name": "food name", "portion": "estimated visible portion",
+            "caloriesMin": 100, "caloriesMax": 150,
+            "proteinGrams": 10, "carbsGrams": 20, "fatGrams": 5,
+            "confidence": "low|medium|high",
+        }],
+        "overallConfidence": "low|medium|high",
+        "assumptions": ["important portion or ingredient assumption"],
+    }
+    system = f"""You are a cautious food-photo estimator. Identify visible foods and estimate portions, calorie ranges, protein, carbohydrates, and fat. Multiple images may show the same meal from different angles; do not double count them. Calories must always be a genuine low-to-high range, never an exact value. Use the user's note only as supporting context. If oil, sauce, ingredients, or scale are unclear, widen the range and lower confidence. Do not invent hidden ingredients. Return only valid JSON matching this schema: {json.dumps(schema)}. All food names, portions, and assumptions must be written in {language}. Numeric fields must be JSON numbers, not strings."""
+    content = [{
+        "type": "text",
+        "text": json.dumps({"foodNote": food_text, "instruction": "Analyze all attached meal photos as one submission."}, ensure_ascii=False),
+    }]
+    content.extend({"type": "image_url", "image_url": {"url": image, "detail": "high"}} for image in images)
+    return [{"role": "system", "content": system}, {"role": "user", "content": content}]
+
+
+def analyze_food_images(body):
+    images = body.get("images") or []
+    validate_images(images)
+    if not images:
+        raise ValueError("请先选择餐食照片")
+    base_url, api_key, model = model_configuration()
+    message = request_model(base_url, api_key, model, food_analysis_prompt(body), tools_enabled=False)
+    analysis = normalize_food_analysis(parse_model_content(message), require_confirmed=False)
+    return analysis, model
+
+
+def call_model(payload, user_id, trace=None):
+    base_url, api_key, model = model_configuration()
     messages = list(payload)
     used_tools = []
     tool_sources = []
@@ -1820,11 +1937,11 @@ def prompt_for(body, memory):
     phase = check_in.get("phase", "morning")
     language = "English" if body.get("language") == "en" else "Chinese"
     phase_tasks = {
-        "morning": """这是早间教练。根据今早体重、睡眠、精力、酸痛、可用时间、最近14天趋势和前一天完整记录，制定今天三餐与运动计划。尊重 weeklyReview.nextWeek 的频率、强度和重点调整；若 exerciseProgress 中有同名动作，应优先采用其确定性 suggestion.target，不得跳过维持或回退建议擅自加量。若有前一天记录，用模型综合完成度、运动量、饮食结构、排便、恢复和目标给前一天打0-100分；评分必须解释依据，不得因为减重越多就机械加分。若没有前一天记录，score必须为null。生成 4-6 个结构化训练项目：sets 是组数；amount 是每组次数或时长；unit 只能是 reps、minutes 或 seconds；intensity 是用户能理解的目标强度；restSeconds 是组间休息秒数。有氧连续训练使用 sets=1、amount=总时长、unit=minutes。输出严格JSON：
+        "morning": """这是早间教练。根据今早体重、睡眠、精力、酸痛、可用时间、最近14天趋势和前一天完整记录，制定今天三餐与运动计划。若 previousDay.evening.foodAnalysis 存在，它是用户确认过的照片营养估算；结合其中的热量区间、蛋白质、碳水、脂肪、可信度和假设调整今天建议，但不得把估算当成精确摄入，也不得因前一天可能吃多而建议极端节食或惩罚性训练。尊重 weeklyReview.nextWeek 的频率、强度和重点调整；若 exerciseProgress 中有同名动作，应优先采用其确定性 suggestion.target，不得跳过维持或回退建议擅自加量。若有前一天记录，用模型综合完成度、运动量、饮食结构、排便、恢复和目标给前一天打0-100分；评分必须解释依据，不得因为减重越多就机械加分。若没有前一天记录，score必须为null。生成 4-6 个结构化训练项目：sets 是组数；amount 是每组次数或时长；unit 只能是 reps、minutes 或 seconds；intensity 是用户能理解的目标强度；restSeconds 是组间休息秒数。有氧连续训练使用 sets=1、amount=总时长、unit=minutes。输出严格JSON：
 {"title":"今日重点，不超过20字","summary":"两句以内","previousDayEvaluation":{"date":"被评分日期或空字符串","score":null,"summary":"评分说明","wins":["优点"],"improve":["改进点"]},"meals":{"breakfast":"具体早餐","lunch":"具体午餐","dinner":"具体晚餐","principles":"份量、蛋白质和饮水原则"},"training":{"loadLabel":"训练强度","items":[{"name":"动作名称","sets":3,"amount":10,"unit":"reps","intensity":"保留2-3次余力","restSeconds":60}]},"recovery":"安全和恢复提醒"}""",
         "midday": """这是训练后教练。比较早间结构化训练建议与用户实际运动、组数、每组数量、单位、负重、完成勾选、主观强度和完成程度；planIndex 对应早间 training.items 的位置。unit 可为 minutes（分钟）、seconds（秒）或 reps（次），totalDuration 只统计已完成的分钟项目。立即生成针对实际使用肌群的拉伸和冷身建议。疼痛时不得建议强行拉伸。输出严格JSON：
 {"title":"训练后重点，不超过20字","summary":"对本次完成情况的简短反馈","stretch":{"duration":"总拉伸时长","items":["4-6条含部位、动作和保持时间的拉伸"],"safety":"安全提醒"}}""",
-        "evening": """这是晚间复盘教练。结合今天早间状态与计划、实际运动、全天饮食、排便和用户感受做简短复盘，不提前给出最终分数；说明明早模型评分会参考哪些实际数据。不要诊断疾病或精确估算无法确认的热量。输出严格JSON：
+        "evening": """这是晚间复盘教练。结合今天早间状态与计划、实际运动、全天饮食、排便和用户感受做简短复盘，不提前给出最终分数；说明明早模型评分会参考哪些实际数据。若本次反馈含 foodAnalysis，它是用户已确认的照片估算；可以引用其热量区间和营养素结构，但必须保留估算性质与可信度，不得改写为精确摄入。不要诊断疾病或精确估算无法确认的热量。输出严格JSON：
 {"title":"今日复盘，不超过20字","summary":"两句以内","wins":["1-3条今天做得好的地方"],"tomorrowScoreFactors":["2-4条明早评分会参考的因素"],"tonightTip":"今晚可执行的恢复建议"}""",
     }
     task = phase_tasks.get(phase, phase_tasks["morning"]) + f"\nEvery user-facing JSON value must be written in {language}."
@@ -2007,7 +2124,7 @@ class Handler(SimpleHTTPRequestHandler):
         path = self.request_path()
         active_trace = None
         if path not in (
-            "/api/register", "/api/login", "/api/logout", "/api/coach", "/api/records",
+            "/api/register", "/api/login", "/api/logout", "/api/coach", "/api/food-analysis", "/api/records",
             "/api/records/delete", "/api/profile/clear", "/api/account/delete",
         ):
             self.send_error(404)
@@ -2057,6 +2174,14 @@ class Handler(SimpleHTTPRequestHandler):
             user = self.current_user()
             if not user:
                 self.send_json(401, {"error": "请先登录"})
+                return
+            if path == "/api/food-analysis":
+                allowed, retry_after = rate_limit(("food-analysis", user["id"]), COACH_RATE_LIMIT, COACH_RATE_WINDOW)
+                if not allowed:
+                    self.send_json(429, {"error": "照片分析请求过于频繁，请稍后再试"}, extra_headers={"Retry-After": str(retry_after)})
+                    return
+                analysis, model = analyze_food_images(body)
+                self.send_json(200, {"analysis": analysis, "model": model})
                 return
             if path == "/api/records":
                 save_record(user["id"], body)

@@ -7,6 +7,10 @@ const isoDate = (date) => {
 
 let photos = [];
 let photoPreviewUrls = [];
+let foodAnalysis = null;
+let foodAnalysisConfirmed = false;
+let foodAnalysisBusy = false;
+let foodAnalysisError = "";
 let records = [];
 let profile = {};
 let exerciseProgress = [];
@@ -37,7 +41,7 @@ const enText = {
   "状态": "Consistency", "正常": "Normal", "偏硬/干结": "Hard / dry", "偏稀": "Loose", "水样": "Watery", "不确定": "Not sure", "感受": "Symptoms",
   "无明显不适": "No discomfort", "需要用力": "Straining", "没排干净": "Incomplete", "伴随腹胀": "Bloating", "疼痛/出血": "Pain / bleeding",
   "持续疼痛、出血或明显异常请咨询医生。": "Consult a doctor for persistent pain, bleeding, or unusual symptoms.", "今晚还有什么感受？": "Anything else tonight?",
-  "完成今日复盘": "Complete today's review", "照片会发送到你配置的 AI 服务分析，请勿上传敏感或可识别他人的照片。": "Photos are sent to your configured AI service. Do not upload sensitive or identifying images.",
+  "完成今日复盘": "Complete today's review", "照片只用于本次分析，不会保存到数据库。请勿上传敏感或可识别他人的照片。": "Photos are used only for this analysis and are not saved to the database. Do not upload sensitive or identifying images.",
   "今日教练": "Today's coach", "清空": "Clear", "从早上的状态开始": "Start with your morning check-in", "我会陪你完成早上计划、训练后拉伸和晚上复盘，并在明早为今天评分。": "I'll guide your morning plan, post-workout stretch, and evening review, then score today tomorrow morning.",
   "最近记录": "Recent records", "0 条记录": "0 records", "完成第一次打卡后，这里会显示你的记录。": "Your records will appear after your first check-in.",
   "健康建议不能替代医生或持证教练的诊断。出现疼痛、胸闷、眩晕等症状时请停止训练并寻求专业帮助。": "Health guidance does not replace a doctor or certified trainer. Stop and seek help for pain, chest tightness, or dizziness.",
@@ -73,6 +77,15 @@ const enText = {
   "今天做得好的地方": "What went well", "明早评分会关注": "For tomorrow's review", "今晚提醒": "For tonight",
   "可选，最多 4 张，每张 4 MB": "Optional, up to 4 photos, 4 MB each",
   "选择照片": "Choose photos", "未选择照片": "No photos selected", "选择饮食照片": "Choose food photos",
+  "分析照片": "Analyze photos", "正在分析…": "Analyzing…", "选择照片后可以估算营养": "Choose photos to estimate nutrition",
+  "已选择照片，可以开始分析": "Photos ready to analyze", "请检查并确认估算结果": "Review and confirm the estimate", "已确认，将随晚间记录保存": "Confirmed and ready to save",
+  "照片营养估算": "Photo nutrition estimate", "这是区间估算，请检查食物和分量后再确认。": "This is a range estimate. Check the foods and portions before confirming.",
+  "＋ 添加食物": "+ Add food", "营养估算合计": "Nutrition estimate totals", "热量区间": "Calorie range", "蛋白质": "Protein", "碳水": "Carbs", "脂肪": "Fat",
+  "确认这份估算": "Confirm this estimate", "✓ 已确认估算": "✓ Estimate confirmed", "食物": "Food", "分量": "Portion", "可信度": "Confidence",
+  "最低热量": "Calories low", "最高热量": "Calories high", "蛋白质（g）": "Protein (g)", "碳水（g）": "Carbs (g)", "脂肪（g）": "Fat (g)",
+  "低": "Low", "中": "Medium", "高": "High", "估算依据": "Assumptions", "删除这项食物": "Remove this food",
+  "请先选择餐食照片": "Choose meal photos first", "照片分析失败": "Photo analysis failed", "请先分析并确认所选照片": "Analyze and confirm the selected photos first",
+  "请填写每项食物名称和分量": "Enter a food name and portion for each item", "请填写有效的热量区间和营养素": "Enter a valid calorie range and nutrient values",
   "记录日期": "Entry date", "一天的三个阶段": "Daily check-in stages", "进度统计范围": "Progress date range", "周报时间范围": "Weekly review period",
   "完成": "Done", "组数": "Sets", "每组": "Per set", "单位": "Unit", "重量（kg）": "Weight (kg)", "次": "reps", "秒": "sec", "删除这项运动": "Remove exercise", "计划": "Target", "休息": "rest",
   "均衡早餐": "A balanced breakfast", "均衡午餐": "A balanced lunch", "均衡晚餐": "A balanced dinner",
@@ -95,7 +108,7 @@ const tr = (text) => {
 };
 
 // Capture only the original interface; user entries and generated advice are rendered separately.
-const dynamicText = "#connection-status, #auth-title, #auth-submit, #auth-toggle, #auth-error, #auth-user, #plan-title, .saved-mark, #record-count, #history-list, #weekly-review-title, #weekly-loading, #food-photo-name";
+const dynamicText = "#connection-status, #auth-title, #auth-submit, #auth-toggle, #auth-error, #auth-user, #plan-title, .saved-mark, #record-count, #history-list, #weekly-review-title, #weekly-loading, #food-photo-name, #analyze-food-photos, #food-analysis-status, #food-analysis-items, #food-analysis-confidence, #food-analysis-assumptions, #confirm-food-analysis";
 const interfaceText = [];
 const interfaceWalker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
 let interfaceNode;
@@ -134,6 +147,7 @@ function applyLanguage() {
   $("auth-error").textContent = tr($("auth-error").textContent);
   renderSubmitLabels();
   renderUploadName();
+  renderFoodAnalysis();
   renderStatus();
   $("language-toggle").textContent = language === "en" ? "中文" : "English";
 }
@@ -433,7 +447,185 @@ function renderUploadName() {
     : tr("未选择照片");
 }
 
+function foodConfidenceLabel(value) {
+  return tr(value === "high" ? "高" : value === "low" ? "低" : "中");
+}
+
+function foodNumber(value) {
+  if (value === "" || value === null || value === undefined) return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function foodAnalysisTotals() {
+  const totals = { caloriesMin: 0, caloriesMax: 0, proteinGrams: 0, carbsGrams: 0, fatGrams: 0 };
+  (foodAnalysis?.items || []).forEach((item) => {
+    Object.keys(totals).forEach((key) => { totals[key] += Math.max(0, foodNumber(item[key]) || 0); });
+  });
+  return totals;
+}
+
+function updateFoodAnalysisTotals() {
+  const totals = foodAnalysisTotals();
+  $("food-total-calories").textContent = `${Math.round(totals.caloriesMin)}–${Math.round(totals.caloriesMax)} kcal`;
+  $("food-total-protein").textContent = `${Math.round(totals.proteinGrams * 10) / 10} g`;
+  $("food-total-carbs").textContent = `${Math.round(totals.carbsGrams * 10) / 10} g`;
+  $("food-total-fat").textContent = `${Math.round(totals.fatGrams * 10) / 10} g`;
+}
+
+function renderFoodAnalysisStatus() {
+  const status = $("food-analysis-status");
+  status.className = "food-analysis-status";
+  if (foodAnalysisBusy) {
+    status.textContent = tr("正在分析…");
+  } else if (foodAnalysisError) {
+    status.textContent = foodAnalysisError;
+    status.classList.add("error");
+  } else if (foodAnalysisConfirmed) {
+    status.textContent = tr("已确认，将随晚间记录保存");
+    status.classList.add("confirmed");
+  } else if (foodAnalysis) {
+    status.textContent = tr("请检查并确认估算结果");
+  } else if (photos.length) {
+    status.textContent = tr("已选择照片，可以开始分析");
+  } else {
+    status.textContent = tr("选择照片后可以估算营养");
+  }
+}
+
+function markFoodAnalysisChanged() {
+  foodAnalysisConfirmed = false;
+  if (foodAnalysis) foodAnalysis.confirmed = false;
+  foodAnalysisError = "";
+  $("food-analysis-panel").classList.remove("confirmed");
+  $("confirm-food-analysis").textContent = tr("确认这份估算");
+  renderFoodAnalysisStatus();
+  updateFoodAnalysisTotals();
+}
+
+function renderFoodAnalysis() {
+  const analyzeButton = $("analyze-food-photos");
+  analyzeButton.disabled = foodAnalysisBusy || !photos.length;
+  analyzeButton.textContent = tr(foodAnalysisBusy ? "正在分析…" : "分析照片");
+  renderFoodAnalysisStatus();
+  const panel = $("food-analysis-panel");
+  panel.classList.toggle("hidden", !foodAnalysis);
+  panel.classList.toggle("confirmed", !!foodAnalysis && foodAnalysisConfirmed);
+  if (!foodAnalysis) return;
+  $("food-analysis-confidence").textContent = `${tr("可信度")} · ${foodConfidenceLabel(foodAnalysis.overallConfidence)}`;
+  $("food-analysis-items").innerHTML = foodAnalysis.items.map((item, index) => `<article class="food-analysis-item" data-index="${index}">
+    <div class="food-item-identity">
+      <label><span>${tr("食物")}</span><input data-field="name" type="text" maxlength="100" value="${escapeHtml(item.name)}" /></label>
+      <label><span>${tr("分量")}</span><input data-field="portion" type="text" maxlength="160" value="${escapeHtml(item.portion)}" /></label>
+      <label class="food-confidence-field"><span>${tr("可信度")}</span><select data-field="confidence"><option value="low"${item.confidence === "low" ? " selected" : ""}>${tr("低")}</option><option value="medium"${item.confidence === "medium" ? " selected" : ""}>${tr("中")}</option><option value="high"${item.confidence === "high" ? " selected" : ""}>${tr("高")}</option></select></label>
+      <button class="remove-food-analysis" type="button" aria-label="${tr("删除这项食物")}">×</button>
+    </div>
+    <div class="food-item-nutrients">
+      <label><span>${tr("最低热量")}</span><input data-field="caloriesMin" type="number" min="0" max="5000" step="1" value="${escapeHtml(item.caloriesMin)}" /></label>
+      <label><span>${tr("最高热量")}</span><input data-field="caloriesMax" type="number" min="0" max="5000" step="1" value="${escapeHtml(item.caloriesMax)}" /></label>
+      <label><span>${tr("蛋白质（g）")}</span><input data-field="proteinGrams" type="number" min="0" max="500" step="0.1" value="${escapeHtml(item.proteinGrams)}" /></label>
+      <label><span>${tr("碳水（g）")}</span><input data-field="carbsGrams" type="number" min="0" max="1000" step="0.1" value="${escapeHtml(item.carbsGrams)}" /></label>
+      <label><span>${tr("脂肪（g）")}</span><input data-field="fatGrams" type="number" min="0" max="500" step="0.1" value="${escapeHtml(item.fatGrams)}" /></label>
+    </div>
+  </article>`).join("");
+  $("food-analysis-items").querySelectorAll("input, select").forEach((input) => input.addEventListener("input", (event) => {
+    const item = foodAnalysis.items[Number(event.target.closest(".food-analysis-item").dataset.index)];
+    item[event.target.dataset.field] = event.target.value;
+    if (event.target.dataset.field === "confidence") {
+      const ranks = { low: 0, medium: 1, high: 2 };
+      foodAnalysis.overallConfidence = foodAnalysis.items.reduce((lowest, current) => ranks[current.confidence] < ranks[lowest] ? current.confidence : lowest, "high");
+      $("food-analysis-confidence").textContent = `${tr("可信度")} · ${foodConfidenceLabel(foodAnalysis.overallConfidence)}`;
+    }
+    markFoodAnalysisChanged();
+  }));
+  $("food-analysis-items").querySelectorAll(".remove-food-analysis").forEach((button) => button.addEventListener("click", (event) => {
+    foodAnalysis.items.splice(Number(event.target.closest(".food-analysis-item").dataset.index), 1);
+    if (!foodAnalysis.items.length) foodAnalysis.items.push({ name: "", portion: "", caloriesMin: "", caloriesMax: "", proteinGrams: "", carbsGrams: "", fatGrams: "", confidence: "low" });
+    markFoodAnalysisChanged();
+    renderFoodAnalysis();
+  }));
+  const assumptions = foodAnalysis.assumptions || [];
+  $("food-analysis-assumptions").innerHTML = assumptions.length ? `<strong>${tr("估算依据")}</strong><ul>${assumptions.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : "";
+  $("confirm-food-analysis").textContent = tr(foodAnalysisConfirmed ? "✓ 已确认估算" : "确认这份估算");
+  updateFoodAnalysisTotals();
+}
+
+function clearFoodAnalysis() {
+  foodAnalysis = null;
+  foodAnalysisConfirmed = false;
+  foodAnalysisBusy = false;
+  foodAnalysisError = "";
+  renderFoodAnalysis();
+}
+
+function validateFoodAnalysisForConfirmation() {
+  const items = foodAnalysis?.items || [];
+  if (!items.length || items.some((item) => !String(item.name || "").trim() || !String(item.portion || "").trim())) {
+    throw new Error(tr("请填写每项食物名称和分量"));
+  }
+  const numericFields = ["caloriesMin", "caloriesMax", "proteinGrams", "carbsGrams", "fatGrams"];
+  const invalid = items.some((item) => numericFields.some((field) => foodNumber(item[field]) === null || foodNumber(item[field]) < 0)
+    || foodNumber(item.caloriesMax) <= foodNumber(item.caloriesMin));
+  if (invalid) throw new Error(tr("请填写有效的热量区间和营养素"));
+}
+
+function confirmedFoodAnalysisPayload() {
+  if (!foodAnalysis || !foodAnalysisConfirmed) return null;
+  return {
+    confirmed: true,
+    overallConfidence: foodAnalysis.overallConfidence,
+    assumptions: foodAnalysis.assumptions || [],
+    items: foodAnalysis.items.map((item) => ({
+      name: String(item.name).trim(), portion: String(item.portion).trim(), confidence: item.confidence,
+      caloriesMin: Number(item.caloriesMin), caloriesMax: Number(item.caloriesMax),
+      proteinGrams: Number(item.proteinGrams), carbsGrams: Number(item.carbsGrams), fatGrams: Number(item.fatGrams),
+    })),
+  };
+}
+
 $("choose-food-photos").addEventListener("click", () => $("food-photos").click());
+
+$("analyze-food-photos").addEventListener("click", async () => {
+  if (!photos.length || foodAnalysisBusy) return;
+  foodAnalysisBusy = true;
+  foodAnalysisError = "";
+  renderFoodAnalysis();
+  try {
+    const images = await Promise.all(photos.map(fileToDataUrl));
+    const response = await fetch("/api/food-analysis", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ images, foodText: $("food").value.trim(), language }) });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || tr("照片分析失败"));
+    foodAnalysis = result.analysis;
+    foodAnalysisConfirmed = false;
+  } catch (error) {
+    foodAnalysis = null;
+    foodAnalysisConfirmed = false;
+    foodAnalysisError = error.message || tr("照片分析失败");
+  } finally {
+    foodAnalysisBusy = false;
+    renderFoodAnalysis();
+  }
+});
+
+$("add-food-analysis-item").addEventListener("click", () => {
+  if (!foodAnalysis || foodAnalysis.items.length >= 12) return;
+  foodAnalysis.items.push({ name: "", portion: "", caloriesMin: "", caloriesMax: "", proteinGrams: "", carbsGrams: "", fatGrams: "", confidence: "low" });
+  markFoodAnalysisChanged();
+  renderFoodAnalysis();
+});
+
+$("confirm-food-analysis").addEventListener("click", () => {
+  try {
+    validateFoodAnalysisForConfirmation();
+    foodAnalysisConfirmed = true;
+    foodAnalysis.confirmed = true;
+    foodAnalysisError = "";
+  } catch (error) {
+    foodAnalysisConfirmed = false;
+    foodAnalysisError = error.message;
+  }
+  renderFoodAnalysis();
+});
 
 function renderPhotoPreviews(message = "") {
   renderUploadName();
@@ -464,6 +656,7 @@ function renderPhotoPreviews(message = "") {
     remove.addEventListener("click", () => {
       photos.splice(index, 1);
       if (!photos.length) $("food-photos").value = "";
+      clearFoodAnalysis();
       renderPhotoPreviews();
     });
     item.append(image, remove);
@@ -477,10 +670,12 @@ $("food-photos").addEventListener("change", (event) => {
   if (selected.length > 4 || selected.some((photo) => !supported.has(photo.type) || photo.size > 4 * 1024 * 1024)) {
     photos = [];
     event.target.value = "";
+    clearFoodAnalysis();
     renderPhotoPreviews(language === "en" ? "Choose up to 4 JPEG, PNG, or WebP images, no more than 4 MB each." : "最多选择 4 张 JPEG、PNG 或 WebP 图片，每张不超过 4 MB。");
     return;
   }
   photos = selected;
+  clearFoodAnalysis();
   renderPhotoPreviews();
 });
 
@@ -610,6 +805,10 @@ function populateForms() {
   exercises.forEach((exercise) => addExerciseRow(exercise));
   setValue("plan-adherence", midday.planAdherence, "partial"); setValue("workout-effort", midday.effort, "3"); setValue("workout-notes", midday.notes);
   setValue("food", evening.food); setValue("bowel-frequency", evening.bowelFrequency, "1"); setValue("bowel-form", evening.bowelForm, "normal"); setValue("bowel-symptoms", evening.bowelSymptoms, "none"); setValue("evening-notes", evening.notes);
+  foodAnalysis = evening.foodAnalysis ? JSON.parse(JSON.stringify(evening.foodAnalysis)) : null;
+  foodAnalysisConfirmed = !!foodAnalysis?.confirmed;
+  foodAnalysisError = "";
+  renderFoodAnalysis();
   $("morning-saved").textContent = record.morning || record.weight ? "✓ 已保存" : "";
   $("midday-saved").textContent = record.midday ? "✓ 已保存" : "";
   $("evening-saved").textContent = record.evening ? "✓ 已保存" : "";
@@ -1000,6 +1199,11 @@ async function runPhase({ phase, button, checkIn, images = [] }) {
     if (phase === "midday") Object.assign(record, { stretch: response });
     if (phase === "evening") Object.assign(record, { eveningReview: response });
     await loadRecords();
+    if (phase === "evening") {
+      photos = [];
+      $("food-photos").value = "";
+      renderPhotoPreviews();
+    }
     const forcedFinish = result.agent?.forcedFinish;
     const safetyInterception = result.agent?.safetyInterception;
     renderCoachResponse(response, phase);
@@ -1040,12 +1244,19 @@ $("midday-form").addEventListener("submit", (event) => {
 $("evening-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   try {
-    const imageData = await Promise.all(photos.map(fileToDataUrl));
-    runPhase({ phase: "evening", button: $("evening-submit"), images: imageData, checkIn: { date: $("log-date").value, food: $("food").value.trim(), bowelFrequency: $("bowel-frequency").value, bowelForm: $("bowel-form").value, bowelSymptoms: $("bowel-symptoms").value, notes: $("evening-notes").value.trim() } });
+    if ((photos.length || foodAnalysis) && !foodAnalysisConfirmed) {
+      foodAnalysisError = tr("请先分析并确认所选照片");
+      renderFoodAnalysis();
+      throw new Error(foodAnalysisError);
+    }
+    runPhase({ phase: "evening", button: $("evening-submit"), checkIn: { date: $("log-date").value, food: $("food").value.trim(), foodAnalysis: confirmedFoodAnalysisPayload(), bowelFrequency: $("bowel-frequency").value, bowelForm: $("bowel-form").value, bowelSymptoms: $("bowel-symptoms").value, notes: $("evening-notes").value.trim() } });
   } catch (error) { setStatus(error.message, "error"); }
 });
 
 $("log-date").addEventListener("change", () => {
+  photos = [];
+  $("food-photos").value = "";
+  renderPhotoPreviews();
   populateForms();
   loadExerciseProgress().catch((error) => setStatus(error.message, "error"));
 });
