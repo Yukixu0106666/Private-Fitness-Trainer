@@ -58,6 +58,7 @@ const enText = {
   "正在连接…": "Connecting…", "记录服务已连接": "Connected", "今天的记录": "Daily log",
   "早上": "Morning", "训练后": "After training", "晚上": "Evening",
   "身体状态": "How you feel", "运动记录": "Workout log", "饮食与恢复": "Food & recovery",
+  "早间": "Morning", "训练": "Workout", "晚间": "Evening",
   "今天身体怎么样？": "How are you feeling today?", "今天练了什么？": "What did you train today?",
   "记下今天的饮食与感受": "Today's food and how you feel",
   "保存，看看今天怎么练": "Save and plan today's training", "保存，看看怎么拉伸": "Save and get stretches",
@@ -73,7 +74,7 @@ const enText = {
   "可选，最多 4 张，每张 4 MB": "Optional, up to 4 photos, 4 MB each",
   "选择照片": "Choose photos", "未选择照片": "No photos selected", "选择饮食照片": "Choose food photos",
   "记录日期": "Entry date", "一天的三个阶段": "Daily check-in stages", "进度统计范围": "Progress date range", "周报时间范围": "Weekly review period",
-  "完成": "Done", "组数": "Sets", "每组数量": "Amount / set", "单位": "Unit", "负重（kg）": "Load (kg)", "次": "reps", "秒": "sec", "删除这项运动": "Remove exercise", "计划": "Target", "休息": "rest",
+  "完成": "Done", "组数": "Sets", "每组": "Per set", "单位": "Unit", "重量（kg）": "Weight (kg)", "次": "reps", "秒": "sec", "删除这项运动": "Remove exercise", "计划": "Target", "休息": "rest",
   "均衡早餐": "A balanced breakfast", "均衡午餐": "A balanced lunch", "均衡晚餐": "A balanced dinner",
   "根据身体感受调整强度。": "Adjust the intensity to how you feel.", "拉伸保持轻柔，不要追求疼痛感。": "Stretch gently and avoid pain.", "早点休息并适量补水。": "Get some rest and stay hydrated.",
   "记录服务未连接": "Record service unavailable", "正在保存…": "Saving…", "正在整理建议…": "Preparing your guidance…", "已保存 · 正在整理建议…": "Saved · Preparing guidance…",
@@ -235,7 +236,7 @@ function localizeExerciseRow(row) {
   row.querySelector(".exercise-name").placeholder = language === "en" ? placeholderText["运动名称，如快走"] : "运动名称，如快走";
   row.querySelector(".remove-exercise").setAttribute("aria-label", tr("删除这项运动"));
   row.querySelectorAll(".exercise-details label > span").forEach((element, index) => {
-    element.textContent = tr(["组数", "每组数量", "单位", "负重（kg）"][index]);
+    element.textContent = tr(["组数", "每组", "单位", "重量（kg）"][index]);
   });
   const unit = row.querySelector(".exercise-unit");
   unit.setAttribute("aria-label", tr("单位"));
@@ -263,9 +264,9 @@ function addExerciseRow(exercise = {}) {
   row.innerHTML = `<div class="exercise-row-main"><label class="exercise-check"><input class="exercise-completed" type="checkbox"${completed ? " checked" : ""} /><span>${language === "en" ? "Done" : "完成"}</span></label><input class="exercise-name" type="text" placeholder="${language === "en" ? "Exercise, e.g. brisk walking" : "运动名称，如快走"}" value="${escapeHtml(name)}" /><button class="remove-exercise" type="button" aria-label="${language === "en" ? "Remove exercise" : "删除这项运动"}">×</button></div>
     <div class="exercise-details">
       <label><span>${language === "en" ? "Sets" : "组数"}</span><input class="exercise-sets" type="number" min="1" max="100" step="1" placeholder="1" value="${escapeHtml(exercise.sets ?? "")}" /></label>
-      <label><span>${language === "en" ? "Amount / set" : "每组数量"}</span><input class="exercise-amount" type="number" min="0" max="10000" step="0.5" placeholder="10" value="${escapeHtml(amount)}" /></label>
+      <label><span>${language === "en" ? "Per set" : "每组"}</span><input class="exercise-amount" type="number" min="0" max="10000" step="0.5" placeholder="10" value="${escapeHtml(amount)}" /></label>
       <label><span>${language === "en" ? "Unit" : "单位"}</span><select class="exercise-unit" aria-label="${language === "en" ? "Unit" : "单位"}"><option value="reps"${unit === "reps" ? " selected" : ""}>${language === "en" ? "reps" : "次"}</option><option value="minutes"${unit === "minutes" ? " selected" : ""}>${language === "en" ? "min" : "分钟"}</option><option value="seconds"${unit === "seconds" ? " selected" : ""}>${language === "en" ? "sec" : "秒"}</option></select></label>
-      <label><span>${language === "en" ? "Load (kg)" : "负重（kg）"}</span><input class="exercise-load" type="number" min="0" max="1000" step="0.5" placeholder="—" value="${escapeHtml(exercise.loadKg ?? "")}" /></label>
+      <label><span>${language === "en" ? "Weight (kg)" : "重量（kg）"}</span><input class="exercise-load" type="number" min="0" max="1000" step="0.5" placeholder="—" value="${escapeHtml(exercise.loadKg ?? "")}" /></label>
     </div>
     <p class="exercise-target hidden"></p>
     <div class="exercise-history hidden" aria-live="polite"></div>`;
@@ -405,6 +406,8 @@ function switchPhase(phase, showSavedResponse = true) {
     const selected = tab.dataset.phase === phase;
     tab.classList.toggle("active", selected);
     tab.setAttribute("aria-pressed", String(selected));
+    if (selected) tab.setAttribute("aria-current", "step");
+    else tab.removeAttribute("aria-current");
   });
   ["morning", "midday", "evening"].forEach((name) => $(`${name}-form`).classList.toggle("hidden", name !== phase));
   if (showSavedResponse) renderSavedResponse();
