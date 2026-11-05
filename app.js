@@ -69,33 +69,79 @@ const enText = {
   "昨天表现": "Yesterday", "今天的运动": "Today's training", "今天怎么吃": "Meals",
   "早餐": "Breakfast", "午餐": "Lunch", "晚餐": "Dinner", "恢复提醒": "Recovery notes",
   "现在这样拉伸": "Your stretches", "安全提醒": "Keep in mind", "今日训练": "Today's training",
-  "今天做得好的地方": "What went well", "明早评分会关注": "For tomorrow's review", "今晚提醒": "For tonight"
+  "今天做得好的地方": "What went well", "明早评分会关注": "For tomorrow's review", "今晚提醒": "For tonight",
+  "可选，最多 4 张，每张 4 MB": "Optional, up to 4 photos, 4 MB each",
+  "选择照片": "Choose photos", "未选择照片": "No photos selected", "选择饮食照片": "Choose food photos",
+  "记录日期": "Entry date", "一天的三个阶段": "Daily check-in stages", "进度统计范围": "Progress date range", "周报时间范围": "Weekly review period",
+  "完成": "Done", "组数": "Sets", "每组数量": "Amount / set", "单位": "Unit", "负重（kg）": "Load (kg)", "次": "reps", "秒": "sec", "删除这项运动": "Remove exercise", "计划": "Target", "休息": "rest",
+  "均衡早餐": "A balanced breakfast", "均衡午餐": "A balanced lunch", "均衡晚餐": "A balanced dinner",
+  "根据身体感受调整强度。": "Adjust the intensity to how you feel.", "拉伸保持轻柔，不要追求疼痛感。": "Stretch gently and avoid pain.", "早点休息并适量补水。": "Get some rest and stay hydrated.",
+  "记录服务未连接": "Record service unavailable", "正在保存…": "Saving…", "正在整理建议…": "Preparing your guidance…", "已保存 · 正在整理建议…": "Saved · Preparing guidance…",
+  "建议已更新": "Guidance ready", "建议已更新 · 部分信息不足": "Guidance ready · Some information missing", "请先查看健康提醒": "Please check the health alert", "AI 服务未连接": "AI service unavailable",
+  "请输入有效邮箱和至少 8 位密码": "Enter a valid email and a password with at least 8 characters", "邮箱或密码错误": "Incorrect email or password", "该邮箱已注册": "This email is already registered", "请先登录": "Please log in first", "尝试次数过多，请稍后再试": "Too many attempts. Please try again later."
 };
-const originalText = new WeakMap();
-const originalPlaceholder = new WeakMap();
-const tr = (text) => language === "en" ? (enText[text] || text) : text;
+const zhText = Object.fromEntries(Object.entries(enText).map(([zh, en]) => [en, zh]));
+const canonicalText = (text) => zhText[text] || text;
+const tr = (text) => {
+  const source = canonicalText(text);
+  if (language !== "en") return source;
+  if (enText[source]) return enText[source];
+  const rating = source.match(/^(\d+)\s*·\s*(.+)$/);
+  if (rating && enText[rating[2]]) return `${rating[1]} · ${enText[rating[2]]}`;
+  const minutes = source.match(/^(\d+(?:[–-]\d+)?)\s*分钟$/);
+  if (minutes) return `${minutes[1]} min`;
+  return source === "✓ 已保存" ? "✓ Saved" : source;
+};
+
+// Capture only the original interface; user entries and generated advice are rendered separately.
+const dynamicText = "#connection-status, #auth-title, #auth-submit, #auth-toggle, #auth-error, #auth-user, #plan-title, .saved-mark, #record-count, #history-list, #weekly-review-title, #weekly-loading, #food-photo-name";
+const interfaceText = [];
+const interfaceWalker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+let interfaceNode;
+while ((interfaceNode = interfaceWalker.nextNode())) {
+  if (interfaceNode.nodeValue.trim() && !interfaceNode.parentElement.closest(dynamicText)) {
+    interfaceText.push([interfaceNode, interfaceNode.nodeValue]);
+  }
+}
+const interfaceAttributes = [...document.querySelectorAll("[placeholder], [aria-label]")].flatMap((element) =>
+  ["placeholder", "aria-label"].filter((name) => element.hasAttribute(name)).map((name) => [element, name, element.getAttribute(name)])
+);
+const placeholderText = {
+  "例如：168": "e.g. 168", "例如：55.05": "e.g. 55.05", "运动名称，如快走": "Exercise, e.g. brisk walking", "例如：右膝不舒服，今天只能在家练": "e.g. My right knee hurts; I can only train at home",
+  "例如：腿比较紧，左肩活动时不舒服": "e.g. Tight legs and left shoulder discomfort", "按早餐、午餐、晚餐和加餐记录，尽量写上大致分量": "List breakfast, lunch, dinner, snacks, and approximate portions",
+  "例如：晚饭后很撑、今天喝水比较少": "e.g. Felt too full after dinner and drank little water", "例如：瑜伽垫、哑铃、弹力带": "e.g. yoga mat, dumbbells, resistance bands", "例如：不吃牛肉、乳糖不耐": "e.g. no beef, lactose intolerant", "例如：旧伤、需要避开的动作": "e.g. past injuries or movements to avoid"
+};
+const submitLabels = { morning: "保存，看看今天怎么练", midday: "保存，看看怎么拉伸", evening: "保存今天的记录" };
+let statusText = "正在连接…";
+let statusState = "loading";
 
 function applyLanguage() {
   document.documentElement.lang = language === "en" ? "en" : "zh-CN";
   document.title = tr("我的健身教练");
-  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-  let node;
-  while ((node = walker.nextNode())) {
-    if (!originalText.has(node)) originalText.set(node, node.nodeValue);
-    const original = originalText.get(node);
-    const trimmed = original.trim();
-    node.nodeValue = trimmed ? original.replace(trimmed, tr(trimmed)) : original;
-  }
-  document.querySelectorAll("[placeholder]").forEach((element) => {
-    if (!originalPlaceholder.has(element)) originalPlaceholder.set(element, element.placeholder);
-    const original = originalPlaceholder.get(element);
-    element.placeholder = language === "en" ? ({
-      "例如：168": "e.g. 168", "例如：55.05": "e.g. 55.05", "运动名称，如快走": "Exercise, e.g. brisk walking", "例如：右膝不舒服，今天只能在家练": "e.g. My right knee hurts; I can only train at home",
-      "例如：腿比较紧，左肩活动时不舒服": "e.g. Tight legs and left shoulder discomfort", "按早餐、午餐、晚餐和加餐记录，尽量写上大致分量": "List breakfast, lunch, dinner, snacks, and approximate portions",
-      "例如：晚饭后很撑、今天喝水比较少": "e.g. Felt too full after dinner and drank little water", "例如：瑜伽垫、哑铃、弹力带": "e.g. yoga mat, dumbbells, resistance bands", "例如：不吃牛肉、乳糖不耐": "e.g. no beef, lactose intolerant", "例如：旧伤、需要避开的动作": "e.g. past injuries or movements to avoid"
-    }[original] || original) : original;
+  interfaceText.forEach(([node, source]) => {
+    if (node.isConnected) node.nodeValue = source.replace(source.trim(), tr(source.trim()));
   });
+  interfaceAttributes.forEach(([element, name, source]) => {
+    element.setAttribute(name, language === "en" ? (placeholderText[source] || tr(source)) : source);
+  });
+  document.querySelectorAll("[data-i18n]").forEach((element) => { element.textContent = tr(element.dataset.i18n); });
+  document.querySelectorAll(".exercise-row").forEach(localizeExerciseRow);
+  document.querySelectorAll(".saved-mark").forEach((element) => { if (element.textContent) element.textContent = tr("✓ 已保存"); });
+  $("auth-title").textContent = tr(registerMode ? "注册" : "登录");
+  $("auth-submit").textContent = tr(registerMode ? "注册并登录" : "登录");
+  $("auth-toggle").textContent = tr(registerMode ? "已有账号？登录" : "还没有账号？注册");
+  $("auth-error").textContent = tr($("auth-error").textContent);
+  renderSubmitLabels();
+  renderUploadName();
+  renderStatus();
   $("language-toggle").textContent = language === "en" ? "中文" : "English";
+}
+
+function renderSubmitLabels() {
+  Object.entries(submitLabels).forEach(([phase, label]) => {
+    const button = $(`${phase}-submit`);
+    button.textContent = tr(button.disabled ? "正在整理建议…" : label);
+  });
 }
 
 $("log-date").value = isoDate(today);
@@ -184,6 +230,24 @@ function refreshExerciseHistory() {
   document.querySelectorAll(".exercise-row").forEach(updateExerciseHistory);
 }
 
+function localizeExerciseRow(row) {
+  row.querySelector(".exercise-check span").textContent = tr("完成");
+  row.querySelector(".exercise-name").placeholder = language === "en" ? placeholderText["运动名称，如快走"] : "运动名称，如快走";
+  row.querySelector(".remove-exercise").setAttribute("aria-label", tr("删除这项运动"));
+  row.querySelectorAll(".exercise-details label > span").forEach((element, index) => {
+    element.textContent = tr(["组数", "每组数量", "单位", "负重（kg）"][index]);
+  });
+  const unit = row.querySelector(".exercise-unit");
+  unit.setAttribute("aria-label", tr("单位"));
+  [...unit.options].forEach((option) => { option.textContent = unitLabel(option.value); });
+  const parts = [];
+  if (row.dataset.intensity) parts.push(tr(row.dataset.intensity));
+  if (row.dataset.restSeconds !== undefined) parts.push(`${tr("休息")} ${row.dataset.restSeconds} ${tr("秒")}`);
+  const target = row.querySelector(".exercise-target");
+  target.textContent = parts.length ? `${tr("计划")}${language === "en" ? ": " : "："}${parts.join(" · ")}` : "";
+  target.classList.toggle("hidden", !parts.length);
+}
+
 function addExerciseRow(exercise = {}) {
   const name = exercise.name || "";
   const amount = exercise.amount ?? exercise.duration ?? "";
@@ -191,6 +255,10 @@ function addExerciseRow(exercise = {}) {
   const completed = exercise.completed !== false;
   const row = document.createElement("div");
   row.className = "exercise-row";
+  row.dataset.intensity = exercise.intensity || "";
+  if (exercise.restSeconds !== undefined && exercise.restSeconds !== null && exercise.restSeconds !== "" && Number.isFinite(Number(exercise.restSeconds))) {
+    row.dataset.restSeconds = exercise.restSeconds;
+  }
   if (exercise.planIndex !== undefined && exercise.planIndex !== null) row.dataset.planIndex = exercise.planIndex;
   row.innerHTML = `<div class="exercise-row-main"><label class="exercise-check"><input class="exercise-completed" type="checkbox"${completed ? " checked" : ""} /><span>${language === "en" ? "Done" : "完成"}</span></label><input class="exercise-name" type="text" placeholder="${language === "en" ? "Exercise, e.g. brisk walking" : "运动名称，如快走"}" value="${escapeHtml(name)}" /><button class="remove-exercise" type="button" aria-label="${language === "en" ? "Remove exercise" : "删除这项运动"}">×</button></div>
     <div class="exercise-details">
@@ -199,7 +267,7 @@ function addExerciseRow(exercise = {}) {
       <label><span>${language === "en" ? "Unit" : "单位"}</span><select class="exercise-unit" aria-label="${language === "en" ? "Unit" : "单位"}"><option value="reps"${unit === "reps" ? " selected" : ""}>${language === "en" ? "reps" : "次"}</option><option value="minutes"${unit === "minutes" ? " selected" : ""}>${language === "en" ? "min" : "分钟"}</option><option value="seconds"${unit === "seconds" ? " selected" : ""}>${language === "en" ? "sec" : "秒"}</option></select></label>
       <label><span>${language === "en" ? "Load (kg)" : "负重（kg）"}</span><input class="exercise-load" type="number" min="0" max="1000" step="0.5" placeholder="—" value="${escapeHtml(exercise.loadKg ?? "")}" /></label>
     </div>
-    ${exercise.intensity || exercise.restSeconds !== "" ? `<p class="exercise-target">${language === "en" ? "Target" : "计划"}：${escapeHtml(exercise.intensity)}${exercise.restSeconds !== "" ? ` · ${language === "en" ? "rest" : "休息"} ${escapeHtml(exercise.restSeconds)} ${language === "en" ? "sec" : "秒"}` : ""}</p>` : ""}
+    <p class="exercise-target hidden"></p>
     <div class="exercise-history hidden" aria-live="polite"></div>`;
   row.querySelector(".remove-exercise").addEventListener("click", () => {
     row.remove();
@@ -212,6 +280,7 @@ function addExerciseRow(exercise = {}) {
   row.querySelector(".exercise-completed").addEventListener("change", syncPlanAdherenceFromExercises);
   row.querySelector(".exercise-name").addEventListener("input", () => updateExerciseHistory(row));
   $("exercise-list").appendChild(row);
+  localizeExerciseRow(row);
   updateExerciseHistory(row);
 }
 
@@ -260,7 +329,7 @@ $("auth-form").addEventListener("submit", async (event) => {
     const result = await authRequest(registerMode ? "/api/register" : "/api/login", { email: $("auth-email").value, password: $("auth-password").value });
     showApp(result.user);
     await loadRecords();
-  } catch (error) { $("auth-error").textContent = error.message; }
+  } catch (error) { $("auth-error").textContent = tr(error.message); }
 });
 
 $("logout-button").addEventListener("click", async () => {
@@ -347,7 +416,7 @@ $("language-toggle").addEventListener("click", () => {
   language = language === "zh" ? "en" : "zh";
   localStorage.setItem("fitness-coach-language", language);
   applyLanguage();
-  if (photos.length) renderPhotoPreviews();
+  renderPhotoPreviews();
   renderHistory();
   renderProgress();
   renderSavedResponse();
@@ -355,7 +424,16 @@ $("language-toggle").addEventListener("click", () => {
   renderWeeklyReview();
 });
 
+function renderUploadName() {
+  $("food-photo-name").textContent = photos.length === 1 ? photos[0].name : photos.length
+    ? (language === "en" ? `${photos.length} photos selected` : `已选择 ${photos.length} 张照片`)
+    : tr("未选择照片");
+}
+
+$("choose-food-photos").addEventListener("click", () => $("food-photos").click());
+
 function renderPhotoPreviews(message = "") {
+  renderUploadName();
   photoPreviewUrls.forEach((url) => URL.revokeObjectURL(url));
   photoPreviewUrls = [];
   const preview = $("photo-preview");
@@ -421,7 +499,7 @@ function trainingItems(items) {
     const structured = item && typeof item === "object";
     const prescription = `${normalized.sets} × ${normalized.amount} ${unitLabel(normalized.unit, normalized.amount)}`;
     const rest = normalized.restSeconds ? ` · ${language === "en" ? "rest" : "休息"} ${normalized.restSeconds}${language === "en" ? " sec" : " 秒"}` : "";
-    return `<div class="training-plan-item"><strong>${escapeHtml(normalized.name)}</strong>${structured ? `<span>${escapeHtml(prescription)}</span><small>${escapeHtml(normalized.intensity)}${escapeHtml(rest)}</small>` : ""}</div>`;
+    return `<div class="training-plan-item"><strong>${escapeHtml(normalized.name)}</strong>${structured ? `<span>${escapeHtml(prescription)}</span><small>${escapeHtml(tr(normalized.intensity))}${escapeHtml(rest)}</small>` : ""}</div>`;
   }).join("")}</div><button id="use-training-plan" class="secondary-button use-training-plan" type="button">${language === "en" ? "Use this as workout log" : "一键带入训练记录"} <span>→</span></button>`;
 }
 
@@ -447,7 +525,7 @@ function renderCoachResponse(response, phase) {
   if (!response) return showEmptyCoach();
   $("empty-plan").classList.add("hidden");
   $("plan-content").classList.remove("hidden");
-  $("plan-title").textContent = response.title || (phase === "morning" ? "今日计划" : phase === "midday" ? "拉伸建议" : "今日复盘");
+  $("plan-title").textContent = response.title || tr(phase === "morning" ? "今日计划" : phase === "midday" ? "拉伸建议" : "今日复盘");
   if (response.safetyAlert) {
     const urgent = response.safetyAlert.level === "emergency";
     const heading = language === "en" ? (urgent ? "Urgent medical attention" : "Medical assessment recommended") : (urgent ? "请立即寻求医疗帮助" : "建议尽快进行医疗评估");
@@ -455,16 +533,16 @@ function renderCoachResponse(response, phase) {
   } else if (phase === "morning") {
     const evaluation = response.previousDayEvaluation;
     const hasScore = evaluation && isValidScore(evaluation.score);
-    const score = hasScore ? `<div class="score-card"><div class="score-number">${escapeHtml(evaluation.score)}<small>/100</small></div><div><strong>昨天表现</strong><p>${escapeHtml(evaluation.summary)}</p></div></div>` : "";
+    const score = hasScore ? `<div class="score-card"><div class="score-number">${escapeHtml(evaluation.score)}<small>/100</small></div><div><strong data-i18n="昨天表现">${tr("昨天表现")}</strong><p>${escapeHtml(evaluation.summary)}</p></div></div>` : "";
     const meals = response.meals || {};
     $("plan-content").innerHTML = `${score}<div class="plan-intro"><strong>${escapeHtml(response.title)}</strong><br />${escapeHtml(response.summary)}</div>
-      <div class="plan-section"><span class="tag">${escapeHtml(response.training?.loadLabel || "今日训练")}</span><h3>今天的运动</h3>${trainingItems(response.training?.items)}</div>
-      <div class="plan-section"><h3>今天怎么吃</h3><div class="meal-grid"><p><strong>早餐</strong>${escapeHtml(meals.breakfast || "均衡早餐")}</p><p><strong>午餐</strong>${escapeHtml(meals.lunch || "均衡午餐")}</p><p><strong>晚餐</strong>${escapeHtml(meals.dinner || "均衡晚餐")}</p></div>${meals.principles ? `<p>${escapeHtml(meals.principles)}</p>` : ""}</div>
-      <div class="plan-section"><h3>恢复提醒</h3><p>${escapeHtml(response.recovery || "根据身体感受调整强度。")}</p></div>`;
+      <div class="plan-section"><span class="tag">${escapeHtml(response.training?.loadLabel || tr("今日训练"))}</span><h3 data-i18n="今天的运动">${tr("今天的运动")}</h3>${trainingItems(response.training?.items)}</div>
+      <div class="plan-section"><h3 data-i18n="今天怎么吃">${tr("今天怎么吃")}</h3><div class="meal-grid"><p><strong data-i18n="早餐">${tr("早餐")}</strong>${escapeHtml(meals.breakfast || tr("均衡早餐"))}</p><p><strong data-i18n="午餐">${tr("午餐")}</strong>${escapeHtml(meals.lunch || tr("均衡午餐"))}</p><p><strong data-i18n="晚餐">${tr("晚餐")}</strong>${escapeHtml(meals.dinner || tr("均衡晚餐"))}</p></div>${meals.principles ? `<p>${escapeHtml(meals.principles)}</p>` : ""}</div>
+      <div class="plan-section"><h3 data-i18n="恢复提醒">${tr("恢复提醒")}</h3><p>${escapeHtml(response.recovery || tr("根据身体感受调整强度。"))}</p></div>`;
   } else if (phase === "midday") {
-    $("plan-content").innerHTML = `<div class="plan-intro"><strong>${escapeHtml(response.title)}</strong><br />${escapeHtml(response.summary)}</div><div class="plan-section"><span class="tag">${escapeHtml(response.stretch?.duration || "8–12 分钟")}</span><h3>现在这样拉伸</h3>${list(response.stretch?.items)}</div><div class="plan-section"><h3>安全提醒</h3><p>${escapeHtml(response.stretch?.safety || "拉伸保持轻柔，不要追求疼痛感。")}</p></div>`;
+    $("plan-content").innerHTML = `<div class="plan-intro"><strong>${escapeHtml(response.title)}</strong><br />${escapeHtml(response.summary)}</div><div class="plan-section"><span class="tag">${escapeHtml(response.stretch?.duration || tr("8–12 分钟"))}</span><h3 data-i18n="现在这样拉伸">${tr("现在这样拉伸")}</h3>${list(response.stretch?.items)}</div><div class="plan-section"><h3 data-i18n="安全提醒">${tr("安全提醒")}</h3><p>${escapeHtml(response.stretch?.safety || tr("拉伸保持轻柔，不要追求疼痛感。"))}</p></div>`;
   } else {
-    $("plan-content").innerHTML = `<div class="plan-intro"><strong>${escapeHtml(response.title)}</strong><br />${escapeHtml(response.summary)}</div><div class="plan-section"><h3>今天做得好的地方</h3>${list(response.wins)}</div><div class="plan-section"><h3>明早评分会关注</h3>${list(response.tomorrowScoreFactors)}</div><div class="plan-section"><h3>今晚提醒</h3><p>${escapeHtml(response.tonightTip || "早点休息并适量补水。")}</p></div>`;
+    $("plan-content").innerHTML = `<div class="plan-intro"><strong>${escapeHtml(response.title)}</strong><br />${escapeHtml(response.summary)}</div><div class="plan-section"><h3 data-i18n="今天做得好的地方">${tr("今天做得好的地方")}</h3>${list(response.wins)}</div><div class="plan-section"><h3 data-i18n="明早评分会关注">${tr("明早评分会关注")}</h3>${list(response.tomorrowScoreFactors)}</div><div class="plan-section"><h3 data-i18n="今晚提醒">${tr("今晚提醒")}</h3><p>${escapeHtml(response.tonightTip || tr("早点休息并适量补水。"))}</p></div>`;
   }
   if (phase === "morning") bindTrainingPlan(response.training?.items);
   applyLanguage();
@@ -490,8 +568,11 @@ function renderProvenance(provenance) {
     if (source.type === "hybrid_pgvector_reranked") return language === "en" ? "related past entries" : "相关历史记录";
     return language === "en" ? "other records" : "其他记录";
   });
+  const missingLabels = language === "en"
+    ? { previousDay: "yesterday's entry", "currentDay.morning": "today's morning entry", "currentDay.morningPlan": "today's training plan", "currentDay.midday": "today's workout entry" }
+    : { previousDay: "昨天的记录", "currentDay.morning": "今天的早间记录", "currentDay.morningPlan": "今天的训练计划", "currentDay.midday": "今天的训练记录" };
   const missing = Array.isArray(provenance.missingData) && provenance.missingData.length
-    ? ` · ${language === "en" ? "Missing" : "缺少"}: ${provenance.missingData.map(escapeHtml).join(", ")}` : "";
+    ? ` · ${language === "en" ? "Missing" : "缺少"}: ${provenance.missingData.map((key) => escapeHtml(missingLabels[key] || (language === "en" ? "some earlier entries" : "部分历史记录"))).join(language === "en" ? ", " : "、")}` : "";
   element.innerHTML = `<strong>${language === "en" ? "Based on" : "参考记录"}</strong>: ${sourceLabels.map(escapeHtml).join(" · ") || (language === "en" ? "this entry only" : "本次记录")}${missing}`;
   element.classList.remove("hidden");
 }
@@ -500,7 +581,7 @@ function showEmptyCoach() {
   $("empty-plan").classList.remove("hidden");
   $("plan-content").classList.add("hidden");
   $("plan-content").innerHTML = "";
-  $("plan-title").textContent = activePhase === "morning" ? "今日计划" : activePhase === "midday" ? "拉伸建议" : "今日复盘";
+  $("plan-title").textContent = tr(activePhase === "morning" ? "今日计划" : activePhase === "midday" ? "拉伸建议" : "今日复盘");
   renderProvenance(null);
   applyLanguage();
 }
@@ -768,11 +849,14 @@ function renderWeeklyReview() {
     button.textContent = language === "en" ? (offset ? "Prior week" : "This week") : (offset ? "上一周" : "本周");
   });
   document.querySelector(".week-toggle").setAttribute("aria-label", language === "en" ? "Weekly review period" : "周报时间范围");
-  if (!weeklyReview) return;
+  $("weekly-review-title").textContent = language === "en" ? (weeklyOffset ? "Last week" : "This week") : (weeklyOffset ? "上一周" : "这一周");
+  if (!weeklyReview) {
+    $("weekly-loading").textContent = tr("正在整理本周记录…");
+    return;
+  }
   const { period, metrics, comparison, nextWeek } = weeklyReview;
   $("weekly-loading").classList.add("hidden");
   $("weekly-body").classList.remove("hidden");
-  $("weekly-review-title").textContent = language === "en" ? (weeklyOffset ? "Last week" : "This week") : (weeklyOffset ? "上一周" : "这一周");
   $("weekly-period").textContent = `${period.start} — ${period.end}${weeklyOffset === 0 ? (language === "en" ? " · week to date" : " · 截至今天") : ""}`;
   const completion = metrics.planCompletionRate === null ? "—" : `${Math.round(metrics.planCompletionRate * 100)}%`;
   $("weekly-metrics").innerHTML = [
@@ -837,8 +921,14 @@ $("history-list").addEventListener("click", async (event) => {
 });
 
 function setStatus(text, state = "") {
-  $("connection-status").className = `status-pill ${state}`;
-  $("connection-status").innerHTML = `<span></span> ${escapeHtml(text)}`;
+  statusText = canonicalText(text);
+  statusState = state;
+  renderStatus();
+}
+
+function renderStatus() {
+  $("connection-status").className = `status-pill ${statusState}`;
+  $("connection-status").innerHTML = `<span></span> ${escapeHtml(tr(statusText))}`;
 }
 
 async function requestCoach(checkIn, imageData = []) {
@@ -883,7 +973,6 @@ async function loadExerciseProgress() {
 }
 
 async function runPhase({ phase, button, checkIn, images = [] }) {
-  const original = button.innerHTML;
   const factualCheckIn = { ...checkIn };
   const profileUpdate = factualCheckIn.profileUpdate;
   delete factualCheckIn.profileUpdate;
@@ -920,7 +1009,7 @@ async function runPhase({ phase, button, checkIn, images = [] }) {
     setStatus(language === "en" ? "AI service unavailable" : "AI 服务未连接", "error"); $("empty-plan").classList.add("hidden"); $("plan-content").classList.remove("hidden");
     const title = checkInSaved ? (language === "en" ? "Check-in saved, but AI guidance failed" : "打卡已保存，但 AI 建议生成失败") : (language === "en" ? "This check-in was not saved" : "这次没有保存");
     $("plan-content").innerHTML = `<div class="plan-intro"><strong>${escapeHtml(title)}</strong><br />${escapeHtml(error.message)}</div>`;
-  } finally { button.disabled = false; button.innerHTML = original; }
+  } finally { button.disabled = false; renderSubmitLabels(); }
 }
 
 $("morning-form").addEventListener("submit", (event) => {
